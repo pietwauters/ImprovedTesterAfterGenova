@@ -4,7 +4,7 @@
 #include <Adafruit_NeoPixel.h>
 //#include "SubjectObserverTemplate.h"
 #define CONFIG_15_20 1  // defines how the pins in the bottom row are organized
-#define MIRROR 1        // Some types of WS1281B LED matrices are mirrored, so the order of the pixels is reversed.
+//#define MIRROR 1        // Some types of WS1281B LED matrices are mirrored, so the order of the pixels is reversed.
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Which pin on the Arduino is connected to the NeoPixels?

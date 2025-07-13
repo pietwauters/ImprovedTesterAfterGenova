@@ -10,6 +10,7 @@
 #include "WS2812BLedMatrix.h"
 #include <vector>
 #include <algorithm>
+#include <map>
 #include <WiFi.h>
 #include "SettingsManager.h"
 #include "esp_task_wdt.h"
@@ -431,7 +432,73 @@ void AdjustThreasholdForRealV() {
 }
 
 #define NR_SAMPLES_DIVIDER 10
-#define NR_SAMPLES  1<<NR_SAMPLES_DIVIDER
+#define NR_SAMPLES  (1L << NR_SAMPLES_DIVIDER)
+
+// Calculate the best representative value for ADC measurements
+long calculateBestADCValue(const std::vector<long>& sortedSamples) {
+  if(sortedSamples.empty()) return 0;
+  
+  // Create frequency map
+  std::map<long, int> valueCount;
+  for(const auto& val : sortedSamples) {
+    valueCount[val]++;
+  }
+  
+  // Method 1: Weighted average of most frequent triplet (best for stable measurements)
+  long bestTripletCenter = sortedSamples[sortedSamples.size()/2]; // fallback to median
+  int bestTripletSum = 0;
+  
+  for(const auto& pair : valueCount) {
+    long centerValue = pair.first;
+    int tripletSum = 0;
+    
+    // Sum frequencies of center-1, center, center+1
+    auto it = valueCount.find(centerValue - 1);
+    if(it != valueCount.end()) tripletSum += it->second;
+    
+    tripletSum += pair.second; // center value
+    it = valueCount.find(centerValue + 1);
+    if(it != valueCount.end()) tripletSum += it->second;
+    
+    if(tripletSum > bestTripletSum) {
+      bestTripletSum = tripletSum;
+      bestTripletCenter = centerValue;
+    }
+  }
+  
+  // Calculate weighted average of the triplet
+  long weightedSum = 0;
+  int totalWeight = 0;
+  
+  for(long val = bestTripletCenter - 1; val <= bestTripletCenter + 1; val++) {
+    auto it = valueCount.find(val);
+    if(it != valueCount.end()) {
+      weightedSum += val * it->second;
+      totalWeight += it->second;
+    }
+  }
+  
+  return (totalWeight > 0) ? (weightedSum / totalWeight) : bestTripletCenter;
+}
+
+// Alternative: Trimmed mean (good for general noise reduction)
+long calculateTrimmedMean(const std::vector<long>& sortedSamples, float trimPercent = 0.1f) {
+  if(sortedSamples.empty()) return 0;
+  
+  int trimCount = (int)(sortedSamples.size() * trimPercent / 2);
+  if(trimCount >= sortedSamples.size()/2) trimCount = 0;
+  
+  long sum = 0;
+  int count = 0;
+  
+  for(int i = trimCount; i < sortedSamples.size() - trimCount; i++) {
+    sum += sortedSamples[i];
+    count++;
+  }
+  
+  return (count > 0) ? (sum / count) : sortedSamples[sortedSamples.size()/2];
+}
+
 void Calibrate()
 {
 
@@ -478,7 +545,66 @@ for(int i = 0; i< NR_SAMPLES; i++){
         max[i] = SortedSamples[i][NR_SAMPLES-1] ;
       
       //terminal.printf("   Max[%d] = %d", i, max[i]);
-      terminal.printf("   Min[%d] = %d      Max[%d] = %d      Percentile_90 [%d] = %d\n", i, min[i],i,max[i],i,(SortedSamples[i][9*NR_SAMPLES/10] + SortedSamples[i][9*NR_SAMPLES/10-1])>>1);
+      int percentile_50_index = (int)((long)NR_SAMPLES * 50L) / 100;
+      int percentile_90_index = (int)((long)NR_SAMPLES * 90L) / 100;
+      
+      // Find most common value
+      std::map<long, int> valueCount;
+      for(const auto& val : SortedSamples[i]) {
+        valueCount[val]++;
+      }
+      
+      long mostCommonValue = SortedSamples[i][0];
+      int maxCount = 0;
+      for(const auto& pair : valueCount) {
+        if(pair.second > maxCount) {
+          maxCount = pair.second;
+          mostCommonValue = pair.first;
+        }
+      }
+      
+      // Find most frequent 3 consecutive values
+      long bestTripletCenter = mostCommonValue;
+      int bestTripletSum = 0;
+      
+      for(const auto& pair : valueCount) {
+        long centerValue = pair.first;
+        int tripletSum = 0;
+        
+        // Sum frequencies of center-1, center, center+1
+        auto it = valueCount.find(centerValue - 1);
+        if(it != valueCount.end()) tripletSum += it->second;
+        
+        tripletSum += pair.second; // center value
+        
+        it = valueCount.find(centerValue + 1);
+        if(it != valueCount.end()) tripletSum += it->second;
+        
+        if(tripletSum > bestTripletSum) {
+          bestTripletSum = tripletSum;
+          bestTripletCenter = centerValue;
+        }
+      }
+      
+      // Find percentile of best triplet center
+      int tripletPercentile = 0;
+      for(int k = 0; k < SortedSamples[i].size(); k++) {
+        if(SortedSamples[i][k] == bestTripletCenter) {
+          tripletPercentile = (k * 100) / NR_SAMPLES;
+          break;
+        }
+      }
+      
+      // Calculate best ADC values using different methods
+      long bestADCValue = calculateBestADCValue(SortedSamples[i]);
+      long trimmedMean = calculateTrimmedMean(SortedSamples[i], 0.1f); // Trim 10% from each end
+      
+      terminal.printf("   Min[%d] = %d      Max[%d] = %d      P50[%d] = %d      P90[%d] = %d\n", 
+                      i, SortedSamples[i][0], i, SortedSamples[i][NR_SAMPLES-1], i, SortedSamples[i][percentile_50_index], i, SortedSamples[i][percentile_90_index]);
+      terminal.printf("   Most common[%d] = %d (%dx)      Best triplet[%d] = %d (%dx) P%d\n", 
+                      i, mostCommonValue, maxCount, i, bestTripletCenter, bestTripletSum, tripletPercentile);
+      terminal.printf("   **BEST ADC[%d] = %d**      Trimmed mean[%d] = %d\n", 
+                      i, bestADCValue, i, trimmedMean);
     //terminal.printf(".");
     }
 }

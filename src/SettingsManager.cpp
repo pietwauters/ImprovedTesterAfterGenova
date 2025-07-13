@@ -103,6 +103,7 @@ void SettingsManager::save() {
         }
     }
     prefs.end();
+    ESP.restart();
 }
 
 
