@@ -131,6 +131,10 @@ String SettingsManager::makeHashedKey(const String& base, size_t index) {
 // This code focuses on storage and key handling as requested.
 
 
+void SettingsManager::setPostSaveCallback(std::function<void()> callback) {
+  postSaveCallback = callback;
+}
+
 void SettingsManager::addWebEndpoints(AsyncWebServer& server) {
   server.on("/settings", HTTP_GET, [this](AsyncWebServerRequest* request) {
   String html = R"rawliteral(
@@ -253,6 +257,12 @@ void SettingsManager::addWebEndpoints(AsyncWebServer& server) {
     }
 
     save();  // Save updated values
+    
+    // Call post-save callback if set
+    if (postSaveCallback) {
+      postSaveCallback();
+    }
+    
     request->redirect("/settings");
   });
 }

@@ -197,6 +197,10 @@ WS2812B_LedMatrix *LedPanel;
 #define MY_ATTENUATION  ADC_ATTEN_DB_11
 //#define MY_ATTENUATION  ADC_ATTEN_DB_6
 
+// Forward declarations
+void synchronizeThresholdValues();
+void LoadSettings();
+
 bool delayAndTestWirePluggedIn( long delay){
 long returntime = millis() + delay;
   while(millis() < returntime){
@@ -286,10 +290,12 @@ void DoEpeeTest() {
   bool bArBr = false;
   bool bBrCr = false;
   testWiresOnByOne();
+  
   while(!WirePluggedIn()){
     bArCr = (testArCr()<myRefs_Ohm[4]);
     bArBr = (testArBr()<myRefs_Ohm[10]);
     bBrCr = (testBrCr()<myRefs_Ohm[10]);
+    
     esp_task_wdt_reset();
     if(bArCr && !bArBr && !bBrCr){
       LedPanel->SetFullMatrix(LedPanel->m_Green);
@@ -403,14 +409,30 @@ void handleCalibrateCommand(const std::vector<String>& args) {
     }
 }
 
+// Function to synchronize myRefs_Ohm with StoredRefs_ohm after settings changes
+void synchronizeThresholdValues() {
+  for(int i = 0; i < 11; i++){
+    myRefs_Ohm[i] = StoredRefs_ohm[i];
+  }
+}
+
 void AdjustThreasholdForRealV() {
+  static bool bInitialAdjustmentDone = false;
   static long TimeToTest = 0;
- int Vreal = 3300;
- bool OKToAdjust = true;
- testWiresOnByOne();
- if(millis() < TimeToTest)
+  
+  // Only perform initial adjustment once at startup
+  if(bInitialAdjustmentDone) {
     return;
- for(int j=0;j<3;j++){
+  }
+  
+  int Vreal = 3300;
+  bool OKToAdjust = true;
+  testWiresOnByOne();
+  
+  if(millis() < TimeToTest)
+    return;
+    
+  for(int j=0;j<3;j++){
       if((measurements[j][j] > 2500)){
         if(measurements[j][j] < Vreal)
           Vreal = measurements[j][j];
@@ -421,14 +443,17 @@ void AdjustThreasholdForRealV() {
       }
         
     } 
-  if(OKToAdjust){
     
+  if(OKToAdjust){
     float factor = (float)Vreal / (float)Vmax;
     for(int i = 0; i< 11; i++){
       myRefs_Ohm[i] = (int)(StoredRefs_ohm[i]*factor);
     }
+    bInitialAdjustmentDone = true; // Mark as completed
+  } else {
+    // If conditions aren't met, try again in 1 second
+    TimeToTest = millis() + 1000;
   }
-  TimeToTest = millis() + 5000;
 }
 
 #define NR_SAMPLES_DIVIDER 10
@@ -689,7 +714,7 @@ void TesterHandler(void *parameter)
       }
       esp_task_wdt_reset();
       //testWiresOnByOne();
-      AdjustThreasholdForRealV();
+      // AdjustThreasholdForRealV(); // Removed from main loop - now only runs at startup
       if(WirePluggedIn()){
         State = WireTesting_1;
         NoWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
@@ -767,6 +792,22 @@ bool CalibrationEnabled;
 
 String deviceName;
 
+void LoadSettings() {
+  // Register settings
+  settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
+  settings.addIntArray("myRefs_Ohm", "Threshold values from 0 - 10 Ohm", StoredRefs_ohm, 11);
+  settings.addInt("R0", "R0 (total resistance (Ron + 2 x 47)", &R0);
+  settings.addInt("Vmax", "Vmax in mV", &Vmax);
+  settings.addString("name", "Device Name", &deviceName);
+  settings.begin("Settings");        // for Preferences namespace
+  settings.load();
+  
+  // Copy the loaded stored references to working references (AFTER settings.load())
+  for(int i = 0; i< 11; i++){
+      myRefs_Ohm[i]= StoredRefs_ohm[i];
+  }
+}
+
 void SetupNetworkStuff(){
   Serial.println("Not returning from sleep");
     
@@ -793,18 +834,14 @@ void SetupNetworkStuff(){
 
   server.begin();
   terminal.printf("HTTP server started\n");
-  // Register settings
-  settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
-  settings.addIntArray("myRefs_Ohm", "Threshold values from 0 - 10 Ohm", StoredRefs_ohm, 11);
-  for(int i = 0; i< 11; i++){
-      myRefs_Ohm[i]= StoredRefs_ohm[i];
-  }
-  settings.addInt("R0", "R0 (total resistance (Ron + 2 x 47)", &R0);
-  settings.addInt("Vmax", "Vmax in mV", &Vmax);
-  settings.addString("name", "Device Name", &deviceName);
-  settings.begin("Settings");        // for Preferences namespace
-  settings.load();
+  
+  // Load settings
+  LoadSettings();
+  
   settings.addWebEndpoints(server);  // to set up web routes
+  
+  // Register callback to synchronize threshold values when settings change via web
+  settings.setPostSaveCallback(synchronizeThresholdValues);
 
 }
 bool bReturnFromSleep = false;
@@ -844,6 +881,9 @@ void setup() {
     
       Serial.println("returning from sleep");
       
+      // Load settings when waking from sleep
+      LoadSettings();
+      
   } else {
       // Power-on reset or other reset
       SetupNetworkStuff();
@@ -856,6 +896,10 @@ void setup() {
     IdleTimeToSleep = testerpreferences.getInt("TimeToSleep",90000);  // go to sleep after 90 seconds if no wires are plugged in
     TimeToDeepSleep = millis()+IdleTimeToSleep;
     testerpreferences.end();
+    
+    // Perform initial threshold adjustment after ADC initialization and settings load
+    AdjustThreasholdForRealV();
+    
     xTaskCreatePinnedToCore(
             TesterHandler,        /* Task function. */
             "TesterHandler",      /* String with name of task. */

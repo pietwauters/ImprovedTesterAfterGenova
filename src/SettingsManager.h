@@ -3,6 +3,7 @@
 
 #include <Preferences.h>
 #include <vector>
+#include <functional>
 #include <Arduino.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -36,10 +37,14 @@ public:
 
  
   void addWebEndpoints(AsyncWebServer& server);
+  
+  // Add callback for when settings are saved via web interface
+  void setPostSaveCallback(std::function<void()> callback);
 
 private:
   Preferences prefs;
   String namespaceStr;
+  std::function<void()> postSaveCallback = nullptr;
 
   std::vector<Setting> settings;
 
