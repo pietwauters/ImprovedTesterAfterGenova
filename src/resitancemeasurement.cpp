@@ -107,7 +107,7 @@ void Set_IODirectionAndValue(uint8_t setting, uint8_t values)
 esp_adc_cal_characteristics_t adc_chars;
 
 // Forward declarations
-void calibrateADCOffsets();
+// void calibrateADCOffsets();
 int getCalibratedVoltage(int raw_value, adc1_channel_t channel);
 
 /*
@@ -353,201 +353,17 @@ void init_AD(){
   test = adc1_get_raw(ADC1_CHANNEL_7);
   test = adc1_get_raw(ADC1_CHANNEL_0);
 
-  // Perform ADC offset calibration
-  calibrateADCOffsets();
-
+  // Remove this line:
+  // calibrateADCOffsets();
 }
 
-// ADC channel offset calibration values (in mV)
-int adc_offset_calibration_high[8] = {0, 0, 0, 0, 0, 0, 0, 0}; // High voltage offsets
-int adc_offset_calibration_low[8] = {0, 0, 0, 0, 0, 0, 0, 0};  // Low voltage offsets
+// Remove these global arrays entirely:
+// int adc_offset_calibration_high[8] = {0, 0, 0, 0, 0, 0, 0, 0}; 
+// int adc_offset_calibration_low[8] = {0, 0, 0, 0, 0, 0, 0, 0};  
 
-// Function to calibrate ADC offsets (call this during setup with no load)
-void calibrateADCOffsets() {
-  const int CALIBRATION_SAMPLES = 100;
-  const int MIN_EXPECTED_VOLTAGE_HIGH = 2800; // mV - minimum expected voltage for high (close to 3.3V when no load)
-  const int MAX_EXPECTED_VOLTAGE_LOW = 500;   // mV - maximum expected voltage for low (close to 0V when no load)
-  const int MAX_VOLTAGE_SPREAD = 300;         // mV - maximum allowed spread between channels
-  
-  Serial.println("Calibrating ADC offsets...");
-  Serial.println("Checking for connections...");
-  
-  int channel_voltages_high[8], channel_voltages_low[8];
-  bool calibration_safe = true;
-  
-  // === HIGH VOLTAGE CALIBRATION ===
-  // Set all driver pins HIGH to provide reference voltage through 47Ω resistors
-  Serial.println("Testing HIGH voltage conditions...");
-  Set_IODirectionAndValue(0x00, 0x7F); // All pins as outputs, all HIGH
-  delay(100); // Allow voltages to stabilize
-  
-  // First pass: check if it's safe to calibrate (high voltage test)
-  for(int ch = 0; ch < 8; ch++) {
-    if(ch == 1 || ch == 2) continue; // Skip unused channels
-    
-    adc1_channel_t channel = (adc1_channel_t)ch;
-    long sum = 0;
-    
-    for(int i = 0; i < 20; i++) {
-      sum += adc1_get_raw(channel);
-      delayMicroseconds(100);
-    }
-    
-    int avg_raw = sum / 20;
-    channel_voltages_high[ch] = esp_adc_cal_raw_to_voltage(avg_raw, &adc_chars);
-    
-    Serial.printf("Channel %d HIGH: %d raw -> %dmV\n", 
-                  ch, avg_raw, channel_voltages_high[ch]);
-    
-    // Check if voltage is too low (indicates external load/connection)
-    if(channel_voltages_high[ch] < MIN_EXPECTED_VOLTAGE_HIGH) {
-      Serial.printf("WARNING: Channel %d HIGH voltage too low (%dmV < %dmV) - possible connection detected!\n", 
-                    ch, channel_voltages_high[ch], MIN_EXPECTED_VOLTAGE_HIGH);
-      calibration_safe = false;
-    }
-  }
-  
-  // === LOW VOLTAGE CALIBRATION ===
-  // Set all driver pins LOW 
-  Serial.println("Testing LOW voltage conditions...");
-  Set_IODirectionAndValue(0x00, 0x00); // All pins as outputs, all LOW
-  delay(100); // Allow voltages to stabilize
-  
-  // Second pass: check low voltage conditions
-  for(int ch = 0; ch < 8; ch++) {
-    if(ch == 1 || ch == 2) continue; // Skip unused channels
-    
-    adc1_channel_t channel = (adc1_channel_t)ch;
-    long sum = 0;
-    
-    for(int i = 0; i < 20; i++) {
-      sum += adc1_get_raw(channel);
-      delayMicroseconds(100);
-    }
-    
-    int avg_raw = sum / 20;
-    channel_voltages_low[ch] = esp_adc_cal_raw_to_voltage(avg_raw, &adc_chars);
-    
-    Serial.printf("Channel %d LOW: %d raw -> %dmV\n", 
-                  ch, avg_raw, channel_voltages_low[ch]);
-    
-    // Check if voltage is too high (indicates external pull-up/connection)
-    if(channel_voltages_low[ch] > MAX_EXPECTED_VOLTAGE_LOW) {
-      Serial.printf("WARNING: Channel %d LOW voltage too high (%dmV > %dmV) - possible connection detected!\n", 
-                    ch, channel_voltages_low[ch], MAX_EXPECTED_VOLTAGE_LOW);
-      calibration_safe = false;
-    }
-  }
-  
-  // Check voltage spread between channels for both high and low
-  int min_voltage_high = 9999, max_voltage_high = 0;
-  int min_voltage_low = 9999, max_voltage_low = 0;
-  
-  for(int ch = 0; ch < 8; ch++) {
-    if(ch == 1 || ch == 2) continue; // Skip unused channels
-    if(channel_voltages_high[ch] < min_voltage_high) min_voltage_high = channel_voltages_high[ch];
-    if(channel_voltages_high[ch] > max_voltage_high) max_voltage_high = channel_voltages_high[ch];
-    if(channel_voltages_low[ch] < min_voltage_low) min_voltage_low = channel_voltages_low[ch];
-    if(channel_voltages_low[ch] > max_voltage_low) max_voltage_low = channel_voltages_low[ch];
-  }
-  
-  int voltage_spread_high = max_voltage_high - min_voltage_high;
-  int voltage_spread_low = max_voltage_low - min_voltage_low;
-  
-  if(voltage_spread_high > MAX_VOLTAGE_SPREAD) {
-    Serial.printf("WARNING: Large HIGH voltage spread between channels (%dmV > %dmV)!\n", 
-                  voltage_spread_high, MAX_VOLTAGE_SPREAD);
-    calibration_safe = false;
-  }
-  
-  if(voltage_spread_low > MAX_VOLTAGE_SPREAD) {
-    Serial.printf("WARNING: Large LOW voltage spread between channels (%dmV > %dmV)!\n", 
-                  voltage_spread_low, MAX_VOLTAGE_SPREAD);
-    calibration_safe = false;
-  }
-  
-  if(!calibration_safe) {
-    Serial.println("CALIBRATION ABORTED: Please disconnect all wires and restart!");
-    Serial.println("Using default calibration values (all zeros).");
-    return;
-  }
-  
-  Serial.println("Safety check passed - proceeding with full calibration...");
-  
-  // === FULL HIGH VOLTAGE CALIBRATION ===
-  Set_IODirectionAndValue(0x00, 0x7F); // All pins HIGH
-  delay(100);
-  
-  for(int ch = 0; ch < 8; ch++) {
-    if(ch == 1 || ch == 2) continue; // Skip unused channels
-    
-    adc1_channel_t channel = (adc1_channel_t)ch;
-    long sum = 0;
-    
-    for(int i = 0; i < CALIBRATION_SAMPLES; i++) {
-      sum += adc1_get_raw(channel);
-      delayMicroseconds(100);
-    }
-    
-    int avg_raw = sum / CALIBRATION_SAMPLES;
-    adc_offset_calibration_high[ch] = esp_adc_cal_raw_to_voltage(avg_raw, &adc_chars);
-    
-    Serial.printf("Channel %d HIGH baseline: %d raw -> %dmV\n", 
-                  ch, avg_raw, adc_offset_calibration_high[ch]);
-  }
-  
-  // === FULL LOW VOLTAGE CALIBRATION ===
-  Set_IODirectionAndValue(0x00, 0x00); // All pins LOW
-  delay(100);
-  
-  for(int ch = 0; ch < 8; ch++) {
-    if(ch == 1 || ch == 2) continue; // Skip unused channels
-    
-    adc1_channel_t channel = (adc1_channel_t)ch;
-    long sum = 0;
-    
-    for(int i = 0; i < CALIBRATION_SAMPLES; i++) {
-      sum += adc1_get_raw(channel);
-      delayMicroseconds(100);
-    }
-    
-    int avg_raw = sum / CALIBRATION_SAMPLES;
-    adc_offset_calibration_low[ch] = esp_adc_cal_raw_to_voltage(avg_raw, &adc_chars);
-    
-    Serial.printf("Channel %d LOW baseline: %d raw -> %dmV\n", 
-                  ch, avg_raw, adc_offset_calibration_low[ch]);
-  }
-  
-  // Calculate offsets relative to channel 0 (reference channel)
-  int reference_voltage_high = adc_offset_calibration_high[0];
-  int reference_voltage_low = adc_offset_calibration_low[0];
-  
-  for(int ch = 0; ch < 8; ch++) {
-    if(ch == 1 || ch == 2) continue; // Skip unused channels
-    adc_offset_calibration_high[ch] = adc_offset_calibration_high[ch] - reference_voltage_high;
-    adc_offset_calibration_low[ch] = adc_offset_calibration_low[ch] - reference_voltage_low;
-    Serial.printf("Channel %d offsets - HIGH: %dmV, LOW: %dmV\n", 
-                  ch, adc_offset_calibration_high[ch], adc_offset_calibration_low[ch]);
-  }
-  
-  Serial.printf("ADC calibration complete. References - HIGH: %dmV, LOW: %dmV\n", 
-                reference_voltage_high, reference_voltage_low);
-}
+// Remove the entire calibrateADCOffsets() function (100+ lines)
 
-// Get offset-corrected voltage using interpolation between high and low calibration points
+// Simplify getCalibratedVoltage to just return uncalibrated voltage:
 int getCalibratedVoltage(int raw_value, adc1_channel_t channel) {
-  int uncalibrated_voltage = esp_adc_cal_raw_to_voltage(raw_value, &adc_chars);
-  
-  // Use simple interpolation between high and low calibration points
-  // For voltages > 1650mV (mid-point), use high calibration
-  // For voltages < 1650mV, use low calibration
-  // This provides better accuracy across the full voltage range
-  
-  if(uncalibrated_voltage > 1650) {
-    // Use high voltage calibration for upper range
-    return uncalibrated_voltage - adc_offset_calibration_high[channel];
-  } else {
-    // Use low voltage calibration for lower range
-    return uncalibrated_voltage - adc_offset_calibration_low[channel];
-  }
+  return esp_adc_cal_raw_to_voltage(raw_value, &adc_chars);
 }

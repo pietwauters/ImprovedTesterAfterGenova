@@ -694,6 +694,7 @@ void TesterHandler(void *parameter)
         if(testArBr()<160){
           //State = FoilTesting;
           DoFoilTest();
+          
           State = Waiting;
           esp_task_wdt_reset();
           vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -722,7 +723,7 @@ void TesterHandler(void *parameter)
 
       }
       esp_task_wdt_reset();
-      if(IdleTimeToSleep < millis()){
+      if(TimeToDeepSleep < millis()){
         Serial.println("Going to sleep now");
         Serial.flush();
         prepareforDeepSleep();
