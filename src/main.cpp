@@ -279,7 +279,7 @@ void DoLameTest() {
   bShowingRed = true;
   esp_task_wdt_reset();
  
-  if(delayAndTestWirePluggedIn(400))
+  if(delayAndTestWirePluggedIn(250))
     break;
   esp_task_wdt_reset();
   testWiresOnByOne();
@@ -398,15 +398,16 @@ bool bAllGood = true;
 
 void handleCalibrateCommand(const std::vector<String>& args) {
     if (args.empty()) {
-        terminal.printf("Calibrate command requires 'on' or 'off' [channel|auto]\n");
-        terminal.printf("Usage: calibrate on [0-2|auto]  or  calibrate off\n");
+        terminal.printf("Calibrate command requires 'on' or 'off' [channel]\n");
+        terminal.printf("Usage: calibrate on [0-2]  or  calibrate off\n");
+        terminal.printf("Default: auto mode (tracks lowest value channel)\n");
         return;
     }
 
     if (args[0] == "on") {
         DoCalibration = true;
         
-        // Set which channel to display (default to 0 if not specified)
+        // Set which channel to display
         if (args.size() > 1) {
             if (args[1] == "auto") {
                 CalibrationAutoMode = true;
@@ -419,15 +420,17 @@ void handleCalibrateCommand(const std::vector<String>& args) {
                     CalibrationDisplayChannel = channel;
                     terminal.printf("Calibration started for channel %d\n", CalibrationDisplayChannel);
                 } else {
-                    terminal.printf("Invalid channel %d. Using channel 0.\n", channel);
-                    CalibrationAutoMode = false;
+                    terminal.printf("Invalid channel %d. Using AUTO mode.\n", channel);
+                    CalibrationAutoMode = true;
                     CalibrationDisplayChannel = 0;
+                    terminal.printf("Calibration started in AUTO mode (lowest value channel)\n");
                 }
             }
         } else {
-            CalibrationAutoMode = false;
-            CalibrationDisplayChannel = 0; // Default to channel 0
-            terminal.printf("Calibration started for channel %d\n", CalibrationDisplayChannel);
+            // Default to auto mode when no channel specified
+            CalibrationAutoMode = true;
+            CalibrationDisplayChannel = 0; // Start with channel 0, will be updated automatically
+            terminal.printf("Calibration started in AUTO mode (lowest value channel)\n");
         }
         
     } else if (args[0] == "off") {
