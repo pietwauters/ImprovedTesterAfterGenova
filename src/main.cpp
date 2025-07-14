@@ -396,11 +396,14 @@ bool bAllGood = true;
 }
 
 
-void handleCalibrateCommand(const std::vector<String>& args) {
+ITerminal* currentTerminal = nullptr;
+
+void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
+    currentTerminal = term;  // Set global pointer
     if (args.empty()) {
-        terminal.printf("Calibrate command requires 'on' or 'off' [channel]\n");
-        terminal.printf("Usage: calibrate on [0-2]  or  calibrate off\n");
-        terminal.printf("Default: auto mode (tracks lowest value channel)\n");
+        term->printf("Calibrate command requires 'on' or 'off' [channel]\n");
+        term->printf("Usage: calibrate on [0-2]  or  calibrate off\n");
+        term->printf("Default: auto mode (tracks lowest value channel)\n");
         return;
     }
 
@@ -411,33 +414,32 @@ void handleCalibrateCommand(const std::vector<String>& args) {
         if (args.size() > 1) {
             if (args[1] == "auto") {
                 CalibrationAutoMode = true;
-                CalibrationDisplayChannel = 0; // Start with channel 0, will be updated automatically
-                terminal.printf("Calibration started in AUTO mode (lowest value channel)\n");
+                CalibrationDisplayChannel = 0;
+                term->printf("Calibration started in AUTO mode (lowest value channel)\n");
             } else {
                 int channel = args[1].toInt();
                 if (channel >= 0 && channel <= 2) {
                     CalibrationAutoMode = false;
                     CalibrationDisplayChannel = channel;
-                    terminal.printf("Calibration started for channel %d\n", CalibrationDisplayChannel);
+                    term->printf("Calibration started for channel %d\n", CalibrationDisplayChannel);
                 } else {
-                    terminal.printf("Invalid channel %d. Using AUTO mode.\n", channel);
+                    term->printf("Invalid channel %d. Using AUTO mode.\n", channel);
                     CalibrationAutoMode = true;
                     CalibrationDisplayChannel = 0;
-                    terminal.printf("Calibration started in AUTO mode (lowest value channel)\n");
+                    term->printf("Calibration started in AUTO mode (lowest value channel)\n");
                 }
             }
         } else {
-            // Default to auto mode when no channel specified
             CalibrationAutoMode = true;
-            CalibrationDisplayChannel = 0; // Start with channel 0, will be updated automatically
-            terminal.printf("Calibration started in AUTO mode (lowest value channel)\n");
+            CalibrationDisplayChannel = 0;
+            term->printf("Calibration started in AUTO mode (lowest value channel)\n");
         }
         
     } else if (args[0] == "off") {
         DoCalibration = false;
         
     } else {
-        terminal.printf("Unknown argument for Calibrate command\n");
+        term->printf("Unknown argument for Calibrate command\n");
     }
 }
 
@@ -586,7 +588,7 @@ void Calibrate()
         }
         
         duration = (millis()-current_time);
-        terminal.printf("Duration = %d\n",duration);
+        currentTerminal->printf("Duration = %d\n",duration);
         
         // Update min/max for all channels (needed for calculations)
         for(int i = 0; i<3;i++){
@@ -613,7 +615,7 @@ void Calibrate()
             // Update display channel if it changed
             if (bestChannel != CalibrationDisplayChannel) {
                 CalibrationDisplayChannel = bestChannel;
-                terminal.printf("AUTO: Switched to channel %d (lowest median: %ld)\n", 
+                currentTerminal->printf("AUTO: Switched to channel %d (lowest median: %ld)\n", 
                                CalibrationDisplayChannel, lowestMedian);
             }
         }
@@ -677,14 +679,14 @@ void Calibrate()
         
         // Show mode in the output
         String modeStr = CalibrationAutoMode ? " (AUTO)" : "";
-        terminal.printf("Channel %d%s:\n", i, modeStr.c_str());
-        terminal.printf("   Min = %d      Max = %d      P50 = %d      P90 = %d\n", 
+        currentTerminal->printf("Channel %d%s:\n", i, modeStr.c_str());
+        currentTerminal->printf("   Min = %d      Max = %d      P50 = %d      P90 = %d\n", 
                         SortedSamples[i][0], SortedSamples[i][NR_SAMPLES-1], 
                         SortedSamples[i][percentile_50_index], SortedSamples[i][percentile_90_index]);
-        terminal.printf("   Most common = %d (%dx)      Best triplet = %d (%dx) P%d\n", 
-                        mostCommonValue, maxCount, bestTripletCenter, bestTripletSum, tripletPercentile);
-        terminal.printf("   **BEST ADC = %d**      Trimmed mean = %d\n", 
-                        bestADCValue, trimmedMean);
+        currentTerminal->printf("   Most common = %d (%dx)      Best triplet = %d (%dx) P%d\n", 
+                    mostCommonValue, maxCount, bestTripletCenter, bestTripletSum, tripletPercentile);
+        currentTerminal->printf("   **BEST ADC = %d**      Trimmed mean = %d\n", 
+                    bestADCValue, trimmedMean);
     }
 }
 
@@ -856,22 +858,32 @@ void SetupNetworkStuff(){
     Serial.println(WiFi.softAPIP());
     terminal.begin();
   // Register command handlers
-  terminal.registerCommand("echo", [](const std::vector<String>& args) {
+  terminal.registerCommand("echo", [](ITerminal* term, const std::vector<String>& args) {
         String response;
         for (auto& arg : args) {
             response += arg + " ";
         }
-        terminal.send(response);
+        term->send(response);
     });
 
-    terminal.registerCommand("reboot", [](const std::vector<String>&) {
-        terminal.send("Rebooting...");
+    terminal.registerCommand("reboot", [](ITerminal* term, const std::vector<String>&) {
+        term->send("Rebooting...");
         ESP.restart();
     });
+    
     terminal.registerCommand("calibrate", handleCalibrateCommand);
+    
+    terminal.registerCommand("help", [](ITerminal* term, const std::vector<String>&) {
+        term->send("Available commands:");
+        term->send("  echo <text>          - Echo back the text");
+        term->send("  reboot               - Restart the device");
+        term->send("  calibrate on [0-2]   - Start calibration (optional channel)");
+        term->send("  calibrate on auto    - Start auto calibration (tracks lowest channel)");
+        term->send("  calibrate off        - Stop calibration");
+        term->send("  help                 - Show this help message");
+    });
 
-
-  server.begin();
+    server.begin();
   terminal.printf("HTTP server started\n");
   
   // Load settings

@@ -67,10 +67,14 @@ void WebTerminal::handleCommand(const String& input) {
 
     for (const auto& c : commands) {
         if (c.name == cmd) {
-            c.callback(args);
+            c.callback(this, args);
             return;
         }
     }
 
     printf("[!] Unknown command: %s\n", cmd.c_str());
+}
+
+void WebTerminal::println(const String& message) {
+    send(message + "\n");
 }
