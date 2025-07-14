@@ -165,6 +165,10 @@ int StoredRefs_ohm[] = {0,1,2,3,4,5,6,7,8,9,10};
 int R0 = 130;
 int Vmax = 2992;
 volatile bool DoCalibration = false;
+int StoredIdleTimeToSleep = 90000;  // Default 90 seconds
+int CalibrationDisplayChannel = 0;  // Default to channel 0
+bool CalibrationAutoMode = false;  // Auto mode flag
+
 
 AsyncWebServer server(80);
 SettingsManager settings;
@@ -394,12 +398,37 @@ bool bAllGood = true;
 
 void handleCalibrateCommand(const std::vector<String>& args) {
     if (args.empty()) {
-        terminal.printf("Calibrate command requires 'on' or 'off'\n");
+        terminal.printf("Calibrate command requires 'on' or 'off' [channel|auto]\n");
+        terminal.printf("Usage: calibrate on [0-2|auto]  or  calibrate off\n");
         return;
     }
 
     if (args[0] == "on") {
         DoCalibration = true;
+        
+        // Set which channel to display (default to 0 if not specified)
+        if (args.size() > 1) {
+            if (args[1] == "auto") {
+                CalibrationAutoMode = true;
+                CalibrationDisplayChannel = 0; // Start with channel 0, will be updated automatically
+                terminal.printf("Calibration started in AUTO mode (lowest value channel)\n");
+            } else {
+                int channel = args[1].toInt();
+                if (channel >= 0 && channel <= 2) {
+                    CalibrationAutoMode = false;
+                    CalibrationDisplayChannel = channel;
+                    terminal.printf("Calibration started for channel %d\n", CalibrationDisplayChannel);
+                } else {
+                    terminal.printf("Invalid channel %d. Using channel 0.\n", channel);
+                    CalibrationAutoMode = false;
+                    CalibrationDisplayChannel = 0;
+                }
+            }
+        } else {
+            CalibrationAutoMode = false;
+            CalibrationDisplayChannel = 0; // Default to channel 0
+            terminal.printf("Calibration started for channel %d\n", CalibrationDisplayChannel);
+        }
         
     } else if (args[0] == "off") {
         DoCalibration = false;
@@ -526,138 +555,134 @@ long calculateTrimmedMean(const std::vector<long>& sortedSamples, float trimPerc
 
 void Calibrate()
 {
-
-long value = 0;
-//long values[NR_SAMPLES];
-long sample;
-vector<long> SortedSamples[3];
-
-long max[] ={0,0,0};
-long min[] = {9999,9999,9999};
-long current_time;
-long duration;
-
-while(DoCalibration){
-value = 0;
-
-esp_task_wdt_reset();
-SortedSamples[0].clear();
-SortedSamples[1].clear();
-SortedSamples[2].clear();
-current_time = millis();
-for(int i = 0; i< NR_SAMPLES; i++){
-  testStraightOnly();
-  esp_task_wdt_reset();
-  for(int j=0;j<3;j++){
-    auto it = std::lower_bound(SortedSamples[j].begin(), SortedSamples[j].end(), measurements[j][j]);
-    SortedSamples[j].insert(it, measurements[j][j]);
-  }
-
-      
-  }
-   duration = (millis()-current_time);
-      
- 
-      terminal.printf("Duration = %d\n",duration);
-      
-    for(int i = 0; i<3;i++){
-
-      if(min[i] > SortedSamples[i][0])
-        min[i] = (SortedSamples[i])[0];
-      //terminal.printf("   Min[%d] = %d", i, min[i]);
-      
-      if(max[i] < SortedSamples[i][NR_SAMPLES-1] )
-        max[i] = SortedSamples[i][NR_SAMPLES-1] ;
-      
-      //terminal.printf("   Max[%d] = %d", i, max[i]);
-      int percentile_50_index = (int)((long)NR_SAMPLES * 50L) / 100;
-      int percentile_90_index = (int)((long)NR_SAMPLES * 90L) / 100;
-      
-      // Find most common value
-      std::map<long, int> valueCount;
-      for(const auto& val : SortedSamples[i]) {
-        valueCount[val]++;
-      }
-      
-      long mostCommonValue = SortedSamples[i][0];
-      int maxCount = 0;
-      for(const auto& pair : valueCount) {
-        if(pair.second > maxCount) {
-          maxCount = pair.second;
-          mostCommonValue = pair.first;
+    long value = 0;
+    long sample;
+    vector<long> SortedSamples[3];
+    
+    long max[] ={0,0,0};
+    long min[] = {9999,9999,9999};
+    long current_time;
+    long duration;
+    
+    while(DoCalibration){
+        value = 0;
+        
+        esp_task_wdt_reset();
+        SortedSamples[0].clear();
+        SortedSamples[1].clear();
+        SortedSamples[2].clear();
+        current_time = millis();
+        
+        for(int i = 0; i< NR_SAMPLES; i++){
+            testStraightOnly();
+            esp_task_wdt_reset();
+            for(int j=0;j<3;j++){
+                auto it = std::lower_bound(SortedSamples[j].begin(), SortedSamples[j].end(), measurements[j][j]);
+                SortedSamples[j].insert(it, measurements[j][j]);
+            }
         }
-      }
-      
-      // Find most frequent 3 consecutive values
-      long bestTripletCenter = mostCommonValue;
-      int bestTripletSum = 0;
-      
-      for(const auto& pair : valueCount) {
-        long centerValue = pair.first;
-        int tripletSum = 0;
         
-        // Sum frequencies of center-1, center, center+1
-        auto it = valueCount.find(centerValue - 1);
-        if(it != valueCount.end()) tripletSum += it->second;
+        duration = (millis()-current_time);
+        terminal.printf("Duration = %d\n",duration);
         
-        tripletSum += pair.second; // center value
-        
-        it = valueCount.find(centerValue + 1);
-        if(it != valueCount.end()) tripletSum += it->second;
-        
-        if(tripletSum > bestTripletSum) {
-          bestTripletSum = tripletSum;
-          bestTripletCenter = centerValue;
+        // Update min/max for all channels (needed for calculations)
+        for(int i = 0; i<3;i++){
+            if(min[i] > SortedSamples[i][0])
+                min[i] = (SortedSamples[i])[0];
+            
+            if(max[i] < SortedSamples[i][NR_SAMPLES-1] )
+                max[i] = SortedSamples[i][NR_SAMPLES-1] ;
         }
-      }
-      
-      // Find percentile of best triplet center
-      int tripletPercentile = 0;
-      for(int k = 0; k < SortedSamples[i].size(); k++) {
-        if(SortedSamples[i][k] == bestTripletCenter) {
-          tripletPercentile = (k * 100) / NR_SAMPLES;
-          break;
+        
+        // Auto mode: find channel with lowest median value
+        if (CalibrationAutoMode) {
+            int bestChannel = 0;
+            long lowestMedian = SortedSamples[0][NR_SAMPLES/2];
+            
+            for (int ch = 1; ch < 3; ch++) {
+                long median = SortedSamples[ch][NR_SAMPLES/2];
+                if (median < lowestMedian) {
+                    lowestMedian = median;
+                    bestChannel = ch;
+                }
+            }
+            
+            // Update display channel if it changed
+            if (bestChannel != CalibrationDisplayChannel) {
+                CalibrationDisplayChannel = bestChannel;
+                terminal.printf("AUTO: Switched to channel %d (lowest median: %ld)\n", 
+                               CalibrationDisplayChannel, lowestMedian);
+            }
         }
-      }
-      
-      // Calculate best ADC values using different methods
-      long bestADCValue = calculateBestADCValue(SortedSamples[i]);
-      long trimmedMean = calculateTrimmedMean(SortedSamples[i], 0.1f); // Trim 10% from each end
-      
-      terminal.printf("   Min[%d] = %d      Max[%d] = %d      P50[%d] = %d      P90[%d] = %d\n", 
-                      i, SortedSamples[i][0], i, SortedSamples[i][NR_SAMPLES-1], i, SortedSamples[i][percentile_50_index], i, SortedSamples[i][percentile_90_index]);
-      terminal.printf("   Most common[%d] = %d (%dx)      Best triplet[%d] = %d (%dx) P%d\n", 
-                      i, mostCommonValue, maxCount, i, bestTripletCenter, bestTripletSum, tripletPercentile);
-      terminal.printf("   **BEST ADC[%d] = %d**      Trimmed mean[%d] = %d\n", 
-                      i, bestADCValue, i, trimmedMean);
-    //terminal.printf(".");
+        
+        // Display results only for the selected channel
+        int i = CalibrationDisplayChannel;
+        
+        int percentile_50_index = (int)((long)NR_SAMPLES * 50L) / 100;
+        int percentile_90_index = (int)((long)NR_SAMPLES * 90L) / 100;
+        
+        // Find most common value
+        std::map<long, int> valueCount;
+        for(const auto& val : SortedSamples[i]) {
+            valueCount[val]++;
+        }
+        
+        long mostCommonValue = SortedSamples[i][0];
+        int maxCount = 0;
+        for(const auto& pair : valueCount) {
+            if(pair.second > maxCount) {
+                maxCount = pair.second;
+                mostCommonValue = pair.first;
+            }
+        }
+        
+        // Find most frequent 3 consecutive values
+        long bestTripletCenter = mostCommonValue;
+        int bestTripletSum = 0;
+        
+        for(const auto& pair : valueCount) {
+            long centerValue = pair.first;
+            int tripletSum = 0;
+            
+            // Sum frequencies of center-1, center, center+1
+            auto it = valueCount.find(centerValue - 1);
+            if(it != valueCount.end()) tripletSum += it->second;
+            
+            tripletSum += pair.second; // center value
+            
+            it = valueCount.find(centerValue + 1);
+            if(it != valueCount.end()) tripletSum += it->second;
+            
+            if(tripletSum > bestTripletSum) {
+                bestTripletSum = tripletSum;
+                bestTripletCenter = centerValue;
+            }
+        }
+        
+        // Find percentile of best triplet center
+        int tripletPercentile = 0;
+        for(int k = 0; k < SortedSamples[i].size(); k++) {
+            if(SortedSamples[i][k] == bestTripletCenter) {
+                tripletPercentile = (k * 100) / NR_SAMPLES;
+                break;
+            }
+        }
+        
+        // Calculate best ADC values using different methods
+        long bestADCValue = calculateBestADCValue(SortedSamples[i]);
+        long trimmedMean = calculateTrimmedMean(SortedSamples[i], 0.1f); // Trim 10% from each end
+        
+        // Show mode in the output
+        String modeStr = CalibrationAutoMode ? " (AUTO)" : "";
+        terminal.printf("Channel %d%s:\n", i, modeStr.c_str());
+        terminal.printf("   Min = %d      Max = %d      P50 = %d      P90 = %d\n", 
+                        SortedSamples[i][0], SortedSamples[i][NR_SAMPLES-1], 
+                        SortedSamples[i][percentile_50_index], SortedSamples[i][percentile_90_index]);
+        terminal.printf("   Most common = %d (%dx)      Best triplet = %d (%dx) P%d\n", 
+                        mostCommonValue, maxCount, bestTripletCenter, bestTripletSum, tripletPercentile);
+        terminal.printf("   **BEST ADC = %d**      Trimmed mean = %d\n", 
+                        bestADCValue, trimmedMean);
     }
-}
-      //av = 0;
-
-    /*while(1){
-      for (int i = 0; i < 512; i++){
-        Set_IODirectionAndValue(IODirection_cr_cl,IOValues_cr_cl);
-        delay(1);
-        value = getSample(cr_analog);
-        if(min > value)
-          min = value;
-        if(max < value)
-          max = value;
-        av +=value;
-        
-      }
-      av>>=9;
-      Serial.print("Av = ");
-      Serial.print(av);
-      Serial.print("   Min = ");
-      Serial.print(min);
-      Serial.print("   Max = ");
-      Serial.println(max);
-      av = 0;
-    }*/
-
-
 }
 
 int timetoswitch = WIRE_TEST_1_TIMEOUT;
@@ -795,6 +820,7 @@ String deviceName;
 
 void LoadSettings() {
   // Register settings
+  settings.addInt("IdleTimeToSleep", "Idle time before sleep (ms)", &StoredIdleTimeToSleep);
   settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
   settings.addIntArray("myRefs_Ohm", "Threshold values from 0 - 10 Ohm", StoredRefs_ohm, 11);
   settings.addInt("R0", "R0 (total resistance (Ron + 2 x 47)", &R0);
@@ -806,6 +832,15 @@ void LoadSettings() {
   // Copy the loaded stored references to working references (AFTER settings.load())
   for(int i = 0; i< 11; i++){
       myRefs_Ohm[i]= StoredRefs_ohm[i];
+  }
+  // Copy the loaded idle time to working variable, but ensure it's not 0
+  if(StoredIdleTimeToSleep > 0) {
+    IdleTimeToSleep = StoredIdleTimeToSleep;
+  } else {
+    // If not set in NVS yet, use default and save it
+    IdleTimeToSleep = 90000;  // 90 seconds default
+    StoredIdleTimeToSleep = IdleTimeToSleep;
+    settings.save();  // Save the default value to NVS
   }
 }
 
@@ -892,11 +927,11 @@ void setup() {
   
     testWiresOnByOne();
     // Check for calibration
-    PreferencesWrapper testerpreferences;
-    testerpreferences.begin("Settings", false);
-    IdleTimeToSleep = testerpreferences.getInt("TimeToSleep",90000);  // go to sleep after 90 seconds if no wires are plugged in
+    //PreferencesWrapper testerpreferences;
+    //testerpreferences.begin("Settings", false);
+    //IdleTimeToSleep = testerpreferences.getInt("TimeToSleep",90000);  // go to sleep after 90 seconds if no wires are plugged in
     TimeToDeepSleep = millis()+IdleTimeToSleep;
-    testerpreferences.end();
+    //testerpreferences.end();
     
     // Perform initial threshold adjustment after ADC initialization and settings load
     AdjustThreasholdForRealV();
