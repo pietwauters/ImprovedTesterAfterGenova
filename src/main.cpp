@@ -30,6 +30,7 @@ using namespace std;
 #include "soc/io_mux_reg.h" // For IO_MUX register definitions
 #include "esp_log.h"
 #include "GpioHoldManager.h"
+#include "USBSerialTerminal.h"
 
 #define BUTTON_PIN_BITMASK(GPIO) (1ULL << GPIO)  // 2 ^ GPIO_NUMBER in hex
 #define WAKEUP_GPIO_32              GPIO_NUM_32     // Only RTC IO are allowed - ESP32 Pin example
@@ -173,6 +174,7 @@ bool CalibrationAutoMode = false;  // Auto mode flag
 AsyncWebServer server(80);
 SettingsManager settings;
 WebTerminal terminal(server);
+USBSerialTerminal serialTerminal; // Add this global variable
 
 /*
 Method to print the reason by which ESP32
@@ -895,6 +897,37 @@ void SetupNetworkStuff(){
   settings.setPostSaveCallback(synchronizeThresholdValues);
 
 }
+
+void setupSerialTerminal() {
+    serialTerminal.begin();
+    
+    // Register the same commands as WebTerminal
+    serialTerminal.registerCommand("echo", [](ITerminal* term, const std::vector<String>& args) {
+        String response;
+        for (auto& arg : args) {
+            response += arg + " ";
+        }
+        term->send(response + "\n");
+    });
+
+    serialTerminal.registerCommand("reboot", [](ITerminal* term, const std::vector<String>&) {
+        term->send("Rebooting...\n");
+        ESP.restart();
+    });
+    
+    serialTerminal.registerCommand("calibrate", handleCalibrateCommand);
+    
+    serialTerminal.registerCommand("help", [](ITerminal* term, const std::vector<String>&) {
+        term->send("Available commands:\n");
+        term->send("  echo <text>          - Echo back the text\n");
+        term->send("  reboot               - Restart the device\n");
+        term->send("  calibrate on [0-2]   - Start calibration (optional channel)\n");
+        term->send("  calibrate on auto    - Start auto calibration (tracks lowest channel)\n");
+        term->send("  calibrate off        - Stop calibration\n");
+        term->send("  help                 - Show this help message\n");
+    });
+}
+
 bool bReturnFromSleep = false;
 
 
@@ -914,6 +947,10 @@ void setup() {
   LedPanel->begin();
   LedPanel->ClearAll();
   Serial.begin(115200);
+  
+  // Setup serial terminal first, before other initialization
+  setupSerialTerminal();
+  
   esp_task_wdt_init(20, true);
   esp_task_wdt_add(NULL);
   Serial.printf("CPU Freq: %d MHz\n", getCpuFrequencyMhz());
@@ -966,10 +1003,14 @@ void setup() {
 
 void loop() {
   vTaskDelay(10 / portTICK_PERIOD_MS);
+  
+  // Always run serial terminal
+  serialTerminal.loop();
+  
   if(!bReturnFromSleep){
     ElegantOTA.loop();
     esp_task_wdt_reset();
-    terminal.loop();
+    terminal.loop(); // WebTerminal only when not returning from sleep
   }
   esp_task_wdt_reset();
 }
