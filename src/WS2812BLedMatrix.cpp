@@ -17,15 +17,19 @@ int WS2812B_LedMatrix::MapCoordinates(int i, int j)
   }
 
 }
-#ifdef MIRROR
-constexpr int transform(int n) {
-    return n + 10 * (2 - n / 5);
-}
-#else
-int transform(int n) {
+
+// Static transform function implementations
+int WS2812B_LedMatrix::transformStandard(int n) {
     return n;
 }
-#endif
+
+int WS2812B_LedMatrix::transformMirrored(int n) {
+    return n + 10 * (2 - n / 5);
+}
+
+void WS2812B_LedMatrix::setMirrorMode(bool mirrored) {
+    m_transformFunc = mirrored ? transformMirrored : transformStandard;
+}
 
 WS2812B_LedMatrix::WS2812B_LedMatrix()
 {
@@ -36,6 +40,9 @@ WS2812B_LedMatrix::WS2812B_LedMatrix()
     digitalWrite(BUZZERPIN, RELATIVE_LOW);
     m_pixels = new Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
     SetBrightness(BRIGHTNESS_NORMAL);
+    // Default to standard transform
+    m_transformFunc = transformStandard;
+
     //queue = xQueueCreate( 60, sizeof( int ) );
 }
 void WS2812B_LedMatrix::begin()
@@ -81,7 +88,7 @@ void WS2812B_LedMatrix::SequenceTest(){
   ClearAll();
   m_pixels->show();
   for(int i = 0; i<NUMPIXELS; i++){
-    m_pixels->setPixelColor(transform(i),m_Red);
+    m_pixels->setPixelColor(m_transformFunc(i),m_Red);
     m_pixels->show();
     delay(2*animationspeed);
   }
@@ -108,7 +115,7 @@ void WS2812B_LedMatrix::setBuzz(bool Value)
 void WS2812B_LedMatrix::SetLine(int i, uint32_t theColor){
 //m_pixels->fill(theColor,i*5,5);
 for(int j = i*5; j < i*5 + 5; j++){
-  m_pixels->setPixelColor(transform(j), theColor);
+  m_pixels->setPixelColor(m_transformFunc(j), theColor);
 }
 }
 
@@ -139,7 +146,7 @@ void WS2812B_LedMatrix::AnimateSwap(int i, int j){
   delay(100);
   for(int j = 0; j<2; j++){
     for(int i = 0; i<7; i++){
-      m_pixels->setPixelColor(transform(animation_sequence[m][j][i]),currentcolor);
+      m_pixels->setPixelColor(m_transformFunc(animation_sequence[m][j][i]),currentcolor);
       m_pixels->show();
       delay(70*animationspeed);
       //m_pixels->setPixelColor(animation_sequence[j][i],m_Off);
@@ -185,7 +192,7 @@ void WS2812B_LedMatrix::AnimateWrongConnection(int i, int j){
 
 
     for(int i = 0; i<7; i++){
-      m_pixels->setPixelColor(transform(animation_sequence_wrong[m][i]),currentcolor);
+      m_pixels->setPixelColor(m_transformFunc(animation_sequence_wrong[m][i]),currentcolor);
       m_pixels->show();
       delay(70*animationspeed/100);
 
@@ -210,7 +217,7 @@ void WS2812B_LedMatrix::AnimateShort(int i, int j){
   delay(100);
   for(int j = 0; j<2; j++){
     for(int i = 0; i<7; i++){
-      m_pixels->setPixelColor(transform(animation_sequence[m][j][i]),currentcolor);
+      m_pixels->setPixelColor(m_transformFunc(animation_sequence[m][j][i]),currentcolor);
       m_pixels->show();
       delay(70*animationspeed/100);
       //m_pixels->setPixelColor(animation_sequence[j][i],m_Off);
@@ -236,7 +243,7 @@ uint32_t currentcolor = m_Green;
 
   }
   for(int i = 10*k+4; i>=10*k; i--){
-    m_pixels->setPixelColor(transform(i),currentcolor);
+    m_pixels->setPixelColor(m_transformFunc(i),currentcolor);
     m_pixels->show();
     delay(60*animationspeed/100);
   }
@@ -245,7 +252,7 @@ uint32_t currentcolor = m_Green;
 void WS2812B_LedMatrix::AnimateBrokenConnection(int k){
   int i = k*2;
     for(int j = 4; j>=0; j-=2){
-    m_pixels->setPixelColor(transform(MapCoordinates(i,j)),m_Red);
+    m_pixels->setPixelColor(m_transformFunc(MapCoordinates(i,j)),m_Red);
     m_pixels->show();
     delay(140*animationspeed/100);
     }
@@ -257,36 +264,36 @@ void WS2812B_LedMatrix::SetSwappedLines(int i, int j){
   if(i>j){k=j;l=i;}
   else{k=i;l=j;}
   if((l-k == 1) ){
-    m_pixels->setPixelColor(transform(5*k+0),m_Blue);
-    m_pixels->setPixelColor(transform(5*k+1),m_Blue);
-    m_pixels->setPixelColor(transform(5*k+2),m_Blue);
-    m_pixels->setPixelColor(transform(5*k+5),m_Blue);
-    m_pixels->setPixelColor(transform(5*k+6),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(5*k+0),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(5*k+1),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(5*k+2),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(5*k+5),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(5*k+6),m_Blue);
 
-    m_pixels->setPixelColor(transform(5*k+4),m_Purple);
-    m_pixels->setPixelColor(transform(5*k+9),m_Purple);
-    m_pixels->setPixelColor(transform(5*k+7),m_Purple);
-    m_pixels->setPixelColor(transform(5*k+3),m_Purple);
-    m_pixels->setPixelColor(transform(5*k+8),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(5*k+4),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(5*k+9),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(5*k+7),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(5*k+3),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(5*k+8),m_Purple);
 
   }
   else{
-    m_pixels->setPixelColor(transform(0),m_Blue);
-    m_pixels->setPixelColor(transform(1),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(0),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(1),m_Blue);
     //m_pixels->setPixelColor(2,m_Blue);
-    m_pixels->setPixelColor(transform(13),m_Blue);
-    m_pixels->setPixelColor(transform(14),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(13),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(14),m_Blue);
 
-    m_pixels->setPixelColor(transform(4),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(4),m_Purple);
     //m_pixels->setPixelColor(3,m_Purple);
 
-    m_pixels->setPixelColor(transform(7),m_Blue);
+    m_pixels->setPixelColor(m_transformFunc(7),m_Blue);
 
-    m_pixels->setPixelColor(transform(6),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(6),m_Purple);
 
-    m_pixels->setPixelColor(transform(10),m_Purple);
-    m_pixels->setPixelColor(transform(11),m_Purple);
-    m_pixels->setPixelColor(transform(12),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(10),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(11),m_Purple);
+    m_pixels->setPixelColor(m_transformFunc(12),m_Purple);
 
   }
 
@@ -304,7 +311,7 @@ void WS2812B_LedMatrix::AnimateArBrConnection(){
   uint32_t currentcolor = m_Blue;
 
     for(int i = 0; i<5; i++){
-      m_pixels->setPixelColor(transform(animation_sequence_ArBr[i]),currentcolor);
+      m_pixels->setPixelColor(m_transformFunc(animation_sequence_ArBr[i]),currentcolor);
       m_pixels->show();
       delay(170*animationspeed/100);
 
@@ -325,7 +332,7 @@ void WS2812B_LedMatrix::AnimateBrCrConnection(){
   uint32_t currentcolor = m_Blue;
 
     for(int i = 0; i<7; i++){
-      m_pixels->setPixelColor(transform(animation_sequence_BrCr[i]),currentcolor);
+      m_pixels->setPixelColor(m_transformFunc(animation_sequence_BrCr[i]),currentcolor);
       m_pixels->show();
       delay(130*animationspeed/100);
     }
@@ -336,7 +343,7 @@ void WS2812B_LedMatrix::AnimateBrCrConnection(){
 uint8_t DiamondShape[] = {2,8,7,6,10,11,12,13,14,18,17,16,22};
 void WS2812B_LedMatrix::DrawDiamond(uint32_t theColor){
     for(int i = 0; i<13; i++){
-      m_pixels->setPixelColor(transform(DiamondShape[i]),theColor);
+      m_pixels->setPixelColor(m_transformFunc(DiamondShape[i]),theColor);
     }
     m_pixels->show();
 }
@@ -350,7 +357,7 @@ uint8_t Letter_E[] = {20,21,22,23,24,19,10,9,17,12,15,14,5};
 
 void WS2812B_LedMatrix::Draw_E(uint32_t theColor){
   for(int i = 0; i<13; i++){
-    m_pixels->setPixelColor(transform(Letter_E[i]),theColor);
+    m_pixels->setPixelColor(m_transformFunc(Letter_E[i]),theColor);
   }
   m_pixels->show();
 }
@@ -362,7 +369,7 @@ uint8_t Letter_F[] = {15,16,17,18,19,10,9,17,12};
 #endif
 void WS2812B_LedMatrix::Draw_F(uint32_t theColor){
   for(int i = 0; i<9; i++){
-    m_pixels->setPixelColor(transform(Letter_F[i]),theColor);
+    m_pixels->setPixelColor(m_transformFunc(Letter_F[i]),theColor);
   }
   m_pixels->show();
 }

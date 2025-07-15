@@ -167,6 +167,7 @@ int R0 = 130;
 int Vmax = 2992;
 volatile bool DoCalibration = false;
 int StoredIdleTimeToSleep = 90000;  // Default 90 seconds
+bool MirrorMode = false;  // Default to no mirror mode
 int CalibrationDisplayChannel = 0;  // Default to channel 0
 bool CalibrationAutoMode = false;  // Auto mode flag
 
@@ -1000,6 +1001,8 @@ void LoadSettings() {
   settings.addInt("R0", "R0 (total resistance (Ron + 2 x 47)", &R0);
   settings.addInt("Vmax", "Vmax in mV", &Vmax);
   settings.addString("name", "Device Name", &deviceName);
+  settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
+ 
   settings.begin("Settings");        // for Preferences namespace
   settings.load();
   
@@ -1059,13 +1062,11 @@ void SetupNetworkStuff(){
     server.begin();
   terminal.printf("HTTP server started\n");
   
-  // Load settings
-  LoadSettings();
-  
   settings.addWebEndpoints(server);  // to set up web routes
   
   // Register callback to synchronize threshold values when settings change via web
   settings.setPostSaveCallback(synchronizeThresholdValues);
+
 
 }
 
@@ -1118,10 +1119,13 @@ void setup() {
     holdManager.add((gpio_num_t)piste_driver);
     holdManager.add((gpio_num_t)PIN);  
 
+  Serial.begin(115200);
+  LoadSettings();
   LedPanel = new WS2812B_LedMatrix();
+  LedPanel->setMirrorMode(MirrorMode);
   LedPanel->begin();
   LedPanel->ClearAll();
-  Serial.begin(115200);
+  
   
   // Setup serial terminal first, before other initialization
   setupSerialTerminal();

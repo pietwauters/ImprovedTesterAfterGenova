@@ -54,6 +54,7 @@ class WS2812B_LedMatrix
         /** Set m_LedStatus
          * \param val New value to set
          */
+        void setMirrorMode(bool mirrored);  // Add this method
         void ClearAll();
         void setBuzz(bool Value);
         void myShow(){m_pixels->show();};
@@ -86,7 +87,12 @@ class WS2812B_LedMatrix
     protected:
 
     private:
-
+        // Function pointer for transform logic
+        int (*m_transformFunc)(int n);
+        
+        // Static transform functions (declare in header)
+        static int transformStandard(int n);
+        static int transformMirrored(int n);
 
         Adafruit_NeoPixel *m_pixels;
         uint8_t m_Brightness = BRIGHTNESS_NORMAL;
