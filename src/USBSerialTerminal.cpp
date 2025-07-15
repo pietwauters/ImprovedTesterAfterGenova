@@ -50,17 +50,29 @@ void USBSerialTerminal::printf(const char* format, ...) {
     
     char buffer[512];
     vsnprintf(buffer, sizeof(buffer), format, args);
-    Serial.print(buffer);
+    
+    // Convert \n to \r\n for proper line endings
+    String output = String(buffer);
+    output.replace("\n", "\r\n");
+    Serial.print(output);
     
     va_end(args);
 }
 
 void USBSerialTerminal::send(const String& message) {
-    Serial.print(message);
+    // Convert \n to \r\n for proper line endings
+    String output = message;
+    output.replace("\n", "\r\n");
+    Serial.print(output);
+    Serial.print("\r\n");
 }
 
 void USBSerialTerminal::println(const String& message) {
-    Serial.println(message);
+    // Print message with proper CR+LF ending
+    String output = message;
+    output.replace("\n", "\r\n");
+    Serial.print(output);
+    Serial.print("\r\n");
 }
 
 void USBSerialTerminal::registerCommand(const String& command, CommandCallback callback) {

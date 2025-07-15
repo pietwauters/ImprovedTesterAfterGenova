@@ -207,6 +207,29 @@ WS2812B_LedMatrix *LedPanel;
 // Forward declarations
 void synchronizeThresholdValues();
 void LoadSettings();
+void handleEchoCommand(ITerminal* term, const std::vector<String>& args);
+void handleRebootCommand(ITerminal* term, const std::vector<String>& args);
+void handleHelpCommand(ITerminal* term, const std::vector<String>& args);
+void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args);
+void handleListCommand(ITerminal* term, const std::vector<String>& args);     // Add this
+void handleSetCommand(ITerminal* term, const std::vector<String>& args);      // Add this
+
+// Command handler class declaration
+class CommonCommandHandler {
+public:
+    template<typename TerminalType>
+    void registerTo(TerminalType* terminal) {
+        terminal->registerCommand("echo", handleEchoCommand);
+        terminal->registerCommand("reboot", handleRebootCommand);
+        terminal->registerCommand("calibrate", handleCalibrateCommand);
+        terminal->registerCommand("list", handleListCommand);
+        terminal->registerCommand("set", handleSetCommand);
+        terminal->registerCommand("help", handleHelpCommand);
+    }
+};
+
+// Create a single global command handler instance
+CommonCommandHandler commandHandler;
 
 bool delayAndTestWirePluggedIn( long delay){
 long returntime = millis() + delay;
@@ -1022,86 +1045,29 @@ void LoadSettings() {
 }
 
 void SetupNetworkStuff(){
-  Serial.println("Not returning from sleep");
+    Serial.println("Not returning from sleep");
     
     WiFi.mode(WIFI_AP);
     WiFi.softAP("Tester", "01041967");
-    ElegantOTA.begin(&server);    // Start ElegantOTA
+    ElegantOTA.begin(&server);
     Serial.println(WiFi.softAPIP());
     terminal.begin();
-  // Register command handlers
-  terminal.registerCommand("echo", [](ITerminal* term, const std::vector<String>& args) {
-        String response;
-        for (auto& arg : args) {
-            response += arg + " ";
-        }
-        term->send(response);
-    });
-
-    terminal.registerCommand("reboot", [](ITerminal* term, const std::vector<String>&) {
-        term->send("Rebooting...");
-        ESP.restart();
-    });
     
-    terminal.registerCommand("calibrate", handleCalibrateCommand);
-    terminal.registerCommand("list", handleListCommand);
-    terminal.registerCommand("set", handleSetCommand);
-
-    terminal.registerCommand("help", [](ITerminal* term, const std::vector<String>&) {
-        term->send("Available commands:");
-        term->send("  echo <text>          - Echo back the text");
-        term->send("  reboot               - Restart the device");
-        term->send("  calibrate on [0-2]   - Start calibration (optional channel)");
-        term->send("  calibrate on auto    - Start auto calibration (tracks lowest channel)");
-        term->send("  calibrate off        - Stop calibration");
-        term->send("  list                 - Show available settings");
-        term->send("  set <name> <value>   - Change a setting");
-        term->send("  help                 - Show this help message");
-    });
+    // Register the single command handler to web terminal
+    commandHandler.registerTo(&terminal);
 
     server.begin();
-  terminal.printf("HTTP server started\n");
-  
-  settings.addWebEndpoints(server);  // to set up web routes
-  
-  // Register callback to synchronize threshold values when settings change via web
-  settings.setPostSaveCallback(synchronizeThresholdValues);
-
-
+    terminal.printf("HTTP server started\n");
+    
+    settings.addWebEndpoints(server);
+    settings.setPostSaveCallback(synchronizeThresholdValues);
 }
 
 void setupSerialTerminal() {
     serialTerminal.begin();
     
-    // Register the same commands as WebTerminal
-    serialTerminal.registerCommand("echo", [](ITerminal* term, const std::vector<String>& args) {
-        String response;
-        for (auto& arg : args) {
-            response += arg + " ";
-        }
-        term->send(response + "\n");
-    });
-
-    serialTerminal.registerCommand("reboot", [](ITerminal* term, const std::vector<String>&) {
-        term->send("Rebooting...\n");
-        ESP.restart();
-    });
-    
-    serialTerminal.registerCommand("calibrate", handleCalibrateCommand);
-    serialTerminal.registerCommand("list", handleListCommand);
-    serialTerminal.registerCommand("set", handleSetCommand);
-
-    serialTerminal.registerCommand("help", [](ITerminal* term, const std::vector<String>&) {
-        term->send("Available commands:\n");
-        term->send("  echo <text>          - Echo back the text\n");
-        term->send("  reboot               - Restart the device\n");
-        term->send("  calibrate on [0-2]   - Start calibration (optional channel)\n");
-        term->send("  calibrate on auto    - Start auto calibration (tracks lowest channel)\n");
-        term->send("  calibrate off        - Stop calibration\n");
-        term->send("  list                 - Show available settings\n");
-        term->send("  set <name> <value>   - Change a setting\n");
-        term->send("  help                 - Show this help message\n");
-    });
+    // Register the same command handler to serial terminal
+    commandHandler.registerTo(&serialTerminal);
 }
 
 bool bReturnFromSleep = false;
@@ -1203,4 +1169,30 @@ extern "C" void app_main() {
     while (true) {
         loop();     // Call the Arduino loop function
     }
+}
+
+// Move the command handler implementations here (before they're used)
+void handleEchoCommand(ITerminal* term, const std::vector<String>& args) {
+    String response;
+    for (auto& arg : args) {
+        response += arg + " ";
+    }
+    term->send(response);
+}
+
+void handleRebootCommand(ITerminal* term, const std::vector<String>& args) {
+    term->send("Rebooting...");
+    ESP.restart();
+}
+
+void handleHelpCommand(ITerminal* term, const std::vector<String>& args) {
+    term->send("Available commands:");
+    term->send("  echo <text>          - Echo back the text");
+    term->send("  reboot               - Restart the device");
+    term->send("  calibrate on [0-2]   - Start calibration (optional channel)");
+    term->send("  calibrate on auto    - Start auto calibration (tracks lowest channel)");
+    term->send("  calibrate off        - Stop calibration");
+    term->send("  list                 - Show available settings");
+    term->send("  set <name> <value>   - Change a setting");
+    term->send("  help                 - Show this help message");
 }
