@@ -32,121 +32,10 @@ using namespace std;
 #include "GpioHoldManager.h"
 #include "USBSerialTerminal.h"
 
-#define BUTTON_PIN_BITMASK(GPIO) (1ULL << GPIO)  // 2 ^ GPIO_NUMBER in hex
-#define WAKEUP_GPIO_32              GPIO_NUM_32     // Only RTC IO are allowed - ESP32 Pin example
-#define WAKEUP_GPIO_34              GPIO_NUM_34     // Only RTC IO are allowed - ESP32 Pin example
-#define WAKEUP_GPIO_35              GPIO_NUM_35     // Only RTC IO are allowed - ESP32 Pin example
-#define WAKEUP_GPIO_36              GPIO_NUM_36     // Only RTC IO are allowed - ESP32 Pin example
-#define WAKEUP_GPIO_39              GPIO_NUM_39     // Only RTC IO are allowed - ESP32 Pin example
-#define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP  60*1       /* Time ESP32 will go to sleep (in seconds) */
+#include "RTOSUtilities.h"  
 
-// Define bitmask for multiple GPIOs
-uint64_t bitmask = BUTTON_PIN_BITMASK(WAKEUP_GPIO_32) | BUTTON_PIN_BITMASK(WAKEUP_GPIO_34) | BUTTON_PIN_BITMASK(WAKEUP_GPIO_35) | BUTTON_PIN_BITMASK(WAKEUP_GPIO_36) | BUTTON_PIN_BITMASK(WAKEUP_GPIO_39);
 
 TaskHandle_t TesterTask;
-GpioHoldManager holdManager;
-void prepareforDeepSleep()
-{
-
-  //Use ext1 as a wake-up source
-  esp_sleep_enable_ext1_wakeup(bitmask, ESP_EXT1_WAKEUP_ANY_HIGH);
-  //esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-
-  //Waarschijnlijk moet ik van de ADC pinnen eerst nog gewone IO pinnen maken
-  pinMode(WAKEUP_GPIO_32, INPUT);  // br
-  pinMode(WAKEUP_GPIO_35, INPUT);  // cr
-  pinMode(WAKEUP_GPIO_36, INPUT);  // cl
-  pinMode(WAKEUP_GPIO_39, INPUT);  // bl
-  pinMode(WAKEUP_GPIO_34, INPUT);  // piste
-
-  
-  pinMode(al_driver, OUTPUT);
-  pinMode(bl_driver, OUTPUT);
-  pinMode(cl_driver, OUTPUT);
-  //pinMode(ar_driver, OUTPUT);
-  pinMode(br_driver, OUTPUT);
-  pinMode(cr_driver, OUTPUT);
-  pinMode(piste_driver, OUTPUT);
-  pinMode(PIN, OUTPUT);
-
-  digitalWrite(al_driver, 1);
-  digitalWrite(bl_driver, 0);
-  digitalWrite(cl_driver, 0);
-  //digitalWrite(ar_driver, 0);
-  digitalWrite(br_driver, 0);
-  digitalWrite(cr_driver, 0);
-  digitalWrite(piste_driver, 0);
-  digitalWrite(PIN, 0);
-
-  holdManager.enableAll();
-  vTaskDelay(300 / portTICK_PERIOD_MS);
-  esp_task_wdt_deinit(); // <--- Add this line to disable the task WDT
-
-  Serial.println("Entering deep sleep...");
-  Serial.flush();
-  esp_deep_sleep_start();
-}
-void returnFromDeepSleep() {
-  // This function is called when the ESP32 wakes up from deep sleep
-  Serial.println("Waking up from deep sleep...");
-  holdManager.disableAll();
-}
-
-
-
-void printTasks() {
-    // Get task list buffer
-    char *taskListBuffer = (char *)pvPortMalloc(2048);  // Adjust size as needed
-    if(!taskListBuffer) {
-        ESP_LOGE("TASKS", "Failed to allocate task list buffer");
-        return;
-    }
-
-    // Get raw task list
-    vTaskList(taskListBuffer);
-    
-    // Parse and enhance with core info
-    printf("\nTask Name      | Core | State | Pri | Stack Free |\n");
-    printf("---------------------------------------------------\n");
-    
-    char *line = strtok(taskListBuffer, "\n");
-    while(line != NULL) {
-        char taskName[32];
-        char state;
-        unsigned int priority;
-        unsigned int stackFree;
-        unsigned int taskNumber;
-
-        // Parse vTaskList format: "TaskName S R 1 1234 5"
-        sscanf(line, "%31s %c %*c %u %u %u", 
-              taskName, &state, &priority, &stackFree, &taskNumber);
-
-        // Get task handle from task number (ESP32-specific)
-        TaskHandle_t handle = xTaskGetHandle(taskName);
-        
-        // Get core affinity
-        BaseType_t core = -1;
-        if(handle) {
-            BaseType_t affinity = xTaskGetAffinity(handle);
-            if(affinity == 1) core = 0;
-            else if(affinity == 2) core = 1;
-        }
-
-        // Print enhanced line
-        printf("%-14s | %-3s | %-5c | %-3u | %-10u |\n",
-              taskName,
-              (core >= 0) ? (core == 0 ? "0" : "1") : "?",
-              state,
-              priority,
-              stackFree);
-
-        line = strtok(NULL, "\n");
-    }
-    
-    vPortFree(taskListBuffer);
-}
-
 
 
 enum State_t {Waiting, WireTesting_1,WireTesting_2, FoilTesting, EpeeTesting};
@@ -158,16 +47,12 @@ enum State_t {Waiting, WireTesting_1,WireTesting_2, FoilTesting, EpeeTesting};
 
 
 
-long TimeToDeepSleep=-1;
-long IdleTimeToSleep = 3000000;
-
 int myRefs_Ohm[]={0,1,2,3,4,5,6,7,8,9,10};
 int StoredRefs_ohm[] = {0,1,2,3,4,5,6,7,8,9,10};
 int R0 = 130;
 int Vmax = 2992;
 volatile bool DoCalibration = false;
-int StoredIdleTimeToSleep = 90000;  // Default 90 seconds
-bool MirrorMode = false;  // Default to no mirror mode
+bool MirrorMode = true;  // Default to no mirror mode
 int CalibrationDisplayChannel = 0;  // Default to channel 0
 bool CalibrationAutoMode = false;  // Auto mode flag
 
@@ -176,27 +61,6 @@ AsyncWebServer server(80);
 SettingsManager settings;
 WebTerminal terminal(server);
 USBSerialTerminal serialTerminal; // Add this global variable
-
-/*
-Method to print the reason by which ESP32
-has been awaken from sleep
-*/
-void print_wakeup_reason(){
-  esp_sleep_wakeup_cause_t wakeup_reason;
-
-  wakeup_reason = esp_sleep_get_wakeup_cause();
-
-  switch(wakeup_reason)
-  {
-    case ESP_SLEEP_WAKEUP_EXT0 : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
-    case ESP_SLEEP_WAKEUP_EXT1 : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
-    case ESP_SLEEP_WAKEUP_TIMER : Serial.println("Wakeup caused by timer"); break;
-    case ESP_SLEEP_WAKEUP_TOUCHPAD : Serial.println("Wakeup caused by touchpad"); break;
-    case ESP_SLEEP_WAKEUP_ULP : Serial.println("Wakeup caused by ULP program"); break;
-    default : Serial.printf("Wakeup was not caused by deep sleep: %d\n",wakeup_reason); break;
-  }
-}
-
 
 
 
@@ -728,120 +592,119 @@ State_t State = Waiting;
 
 void TesterHandler(void *parameter)
 {
+    
   while(true)
   {
-  if(DoCalibration){
-    Calibrate();
-  }
+    if(DoCalibration){
+      Calibrate();
+    }
 
-  esp_task_wdt_reset();
-  if(Waiting == State)
-  {
-      if(testArCr()<160){
-        State = EpeeTesting;
-        DoEpeeTest();
-        State = Waiting;
+    esp_task_wdt_reset();
+    if(Waiting == State)
+    {
+        // CRITICAL: Always update measurements first!
+        testWiresOnByOne();
+        
+        if(testArCr()<160){
+          State = EpeeTesting;
+          DoEpeeTest();
+          State = Waiting;
+          esp_task_wdt_reset();
+          vTaskDelay(1000 / portTICK_PERIOD_MS);
+          esp_task_wdt_reset();
+        }
+        else{
+          if(testArBr()<160){
+            DoFoilTest();
+            State = Waiting;
+            esp_task_wdt_reset();
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            esp_task_wdt_reset();
+            
+          }
+          else{
+            if(testBrCr()<160){
+              DoLameTest();
+              State = Waiting;
+              esp_task_wdt_reset();
+              vTaskDelay(1000 / portTICK_PERIOD_MS);
+              esp_task_wdt_reset();
+              
+            }
+          }
+        }
+ esp_task_wdt_reset();       
+        if(WirePluggedIn()){
+          State = WireTesting_1;
+          NoWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
+          timetoswitch = WIRE_TEST_1_TIMEOUT;
+          
+        }
+        
+        esp_task_wdt_reset();
+        
+    }
+
+    esp_task_wdt_reset();
+    if(WireTesting_1 == State)
+    {
+      
+      
+      testWiresOnByOne();
+      bAllGood = DoQuickCheck();
+      if(bAllGood){
+        timetoswitch--;
+      }
+      else{
+        timetoswitch = WIRE_TEST_1_TIMEOUT;
+        if(!WirePluggedIn())
+          NoWireTimeout--;
+        else {
+          NoWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
+        }
+        if(!NoWireTimeout) {
+          State = Waiting;
+          
+        }
+      }
+      
+      if(!timetoswitch){
+        for(int i = 0; i< 5; i+=2){
+          LedPanel->SetLine(i, LedPanel->m_Green);
+        }
+        LedPanel->myShow();
         esp_task_wdt_reset();
         vTaskDelay(1000 / portTICK_PERIOD_MS);
         esp_task_wdt_reset();
-        TimeToDeepSleep = millis()+IdleTimeToSleep;
+        State = WireTesting_2;
       }
-      else{
-        if(testArBr()<160){
-          //State = FoilTesting;
-          DoFoilTest();
-          
-          State = Waiting;
-          esp_task_wdt_reset();
-          vTaskDelay(1000 / portTICK_PERIOD_MS);
-          esp_task_wdt_reset();
-          TimeToDeepSleep = millis()+IdleTimeToSleep;
-        }
-        else{
-          if(testBrCr()<160){
-          //State = LameTesting;
-          DoLameTest();
-          State = Waiting;
-          esp_task_wdt_reset();
-          vTaskDelay(1000 / portTICK_PERIOD_MS);
-          esp_task_wdt_reset();
-          TimeToDeepSleep = millis()+IdleTimeToSleep;
-          }
-        }
-      }
-      esp_task_wdt_reset();
-      //testWiresOnByOne();
-      // AdjustThreasholdForRealV(); // Removed from main loop - now only runs at startup
-      if(WirePluggedIn()){
-        State = WireTesting_1;
-        NoWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
-        timetoswitch = WIRE_TEST_1_TIMEOUT;
-
-      }
-      esp_task_wdt_reset();
-      if(TimeToDeepSleep < millis()){
-        Serial.println("Going to sleep now");
-        Serial.flush();
-        prepareforDeepSleep();
-
-      }
-  }
-
-  esp_task_wdt_reset();
-  if(WireTesting_1 == State)
-  {
-    TimeToDeepSleep = millis()+IdleTimeToSleep;
-    testWiresOnByOne();
-    bAllGood = DoQuickCheck();
-    if(bAllGood){
-      timetoswitch--;
     }
-    else{
-      timetoswitch = WIRE_TEST_1_TIMEOUT;
-      if(!WirePluggedIn())
-        NoWireTimeout--;
-      else {
-        NoWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
-      }
-      if(!NoWireTimeout)
-        State = Waiting;
-
-    }
-  if(!timetoswitch){
-    for(int i = 0; i< 5; i+=2){
-      LedPanel->SetLine(i, LedPanel->m_Green);
-    }
-      LedPanel->myShow();
-      esp_task_wdt_reset();
-      vTaskDelay(1000 / portTICK_PERIOD_MS);
-      esp_task_wdt_reset();
-      State = WireTesting_2;
-    }
-  }
-  if(WireTesting_2 == State)
-  {
-    TimeToDeepSleep = millis()+IdleTimeToSleep;
-    for(int i= 100000;i>0;i--){
-      esp_task_wdt_reset();
-      if(!testStraightOnly())
-        i = 0;
-    }
-
-    LedPanel->ClearAll();
-    LedPanel->myShow();
-    for(int i = 0; i < 3; i++)
-    {
-      bAllGood &= AnimateSingleWire(i);
-    }
-    esp_task_wdt_reset();
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
-    esp_task_wdt_reset();
-    timetoswitch = 3;
-    LedPanel->ClearAll();
-    LedPanel->myShow();
-    State = Waiting;
-  }
     
+    if(WireTesting_2 == State)
+    {
+      
+      
+      for(int i= 100000;i>0;i--){
+        esp_task_wdt_reset();
+        if(!testStraightOnly())
+          i = 0;
+      }
+
+      LedPanel->ClearAll();
+      LedPanel->myShow();
+      for(int i = 0; i < 3; i++)
+      {
+        bAllGood &= AnimateSingleWire(i);
+      }
+      esp_task_wdt_reset();
+      vTaskDelay(5000 / portTICK_PERIOD_MS);
+      esp_task_wdt_reset();
+      timetoswitch = 3;
+      LedPanel->ClearAll();
+      LedPanel->myShow();
+      State = Waiting;
+      
+    }
   }
 }
 
@@ -853,7 +716,7 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
     term->printf("===================\n");
     
     term->printf("Integer settings:\n");
-    term->printf("  IdleTimeToSleep     : %d ms (Idle time before sleep)\n", StoredIdleTimeToSleep);
+    
     term->printf("  R0                  : %d ohm (Total resistance Ron + 2x47)\n", R0);
     term->printf("  Vmax                : %d mV (Maximum voltage)\n", Vmax);
     
@@ -879,15 +742,14 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
         if(i < 10) term->printf(", ");
     }
     term->printf("]\n");
-    term->printf("  IdleTimeToSleep     : %ld ms (active)\n", IdleTimeToSleep);
+    
 }
 
 
 void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
     if (args.size() < 2) {
         term->printf("Usage: set <setting_name> <value>\n");
-        term->printf("Available settings: IdleTimeToSleep, R0, Vmax, bCalibrate, name, myRefs_Ohm\n");
-        term->printf("Example: set IdleTimeToSleep 120000\n");
+        term->printf("Available settings: R0, Vmax, bCalibrate, name, myRefs_Ohm\n");
         term->printf("Example: set name \"MyTester\"\n");
         term->printf("Example: set myRefs_Ohm 0,1,2,3,4,5,6,7,8,9,12\n");
         return;
@@ -899,17 +761,7 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
     term->printf("Setting '%s' to '%s'...\n", settingName.c_str(), value.c_str());
     
     // Integer settings
-    if (settingName == "IdleTimeToSleep") {
-        int newValue = value.toInt();
-        if (newValue <= 0) {
-            term->printf("Error: IdleTimeToSleep must be > 0\n");
-            return;
-        }
-        StoredIdleTimeToSleep = newValue;
-        IdleTimeToSleep = newValue;  // Update working variable too
-        term->printf("✓ Set IdleTimeToSleep = %d ms\n", newValue);
-        
-    } else if (settingName == "R0") {
+    if (settingName == "R0") {
         int newValue = value.toInt();
         if (newValue <= 0) {
             term->printf("Error: R0 must be > 0\n");
@@ -1002,7 +854,7 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
         
     } else {
         term->printf("Error: Unknown setting '%s'\n", settingName.c_str());
-        term->printf("Available: IdleTimeToSleep, R0, Vmax, bCalibrate, name, myRefs_Ohm\n");
+        term->printf("Available:  R0, Vmax, bCalibrate, name, myRefs_Ohm\n");
         return;
     }
     
@@ -1018,7 +870,7 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
 
 void LoadSettings() {
   // Register settings
-  settings.addInt("IdleTimeToSleep", "Idle time before sleep (ms)", &StoredIdleTimeToSleep);
+
   settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
   settings.addIntArray("myRefs_Ohm", "Threshold values from 0 - 10 Ohm", StoredRefs_ohm, 11);
   settings.addInt("R0", "R0 (total resistance (Ron + 2 x 47)", &R0);
@@ -1033,19 +885,11 @@ void LoadSettings() {
   for(int i = 0; i< 11; i++){
       myRefs_Ohm[i]= StoredRefs_ohm[i];
   }
-  // Copy the loaded idle time to working variable, but ensure it's not 0
-  if(StoredIdleTimeToSleep > 0) {
-    IdleTimeToSleep = StoredIdleTimeToSleep;
-  } else {
-    // If not set in NVS yet, use default and save it
-    IdleTimeToSleep = 90000;  // 90 seconds default
-    StoredIdleTimeToSleep = IdleTimeToSleep;
-    settings.save();  // Save the default value to NVS
-  }
+  
 }
 
 void SetupNetworkStuff(){
-    Serial.println("Not returning from sleep");
+    
     
     WiFi.mode(WIFI_AP);
     WiFi.softAP("Tester", "01041967");
@@ -1070,22 +914,12 @@ void setupSerialTerminal() {
     commandHandler.registerTo(&serialTerminal);
 }
 
-bool bReturnFromSleep = false;
-
 
 void setup() {
   // put your setup code here, to run once:
   setCpuFrequencyMhz(240); // Set CPU frequency to 240 MHz
-  // Register all pins you want to manage
-    holdManager.add((gpio_num_t)al_driver);
-    holdManager.add((gpio_num_t)bl_driver);
-    holdManager.add((gpio_num_t)cl_driver);
-    holdManager.add((gpio_num_t)br_driver);
-    holdManager.add((gpio_num_t)cr_driver);
-    holdManager.add((gpio_num_t)piste_driver);
-    holdManager.add((gpio_num_t)PIN);  
-
   Serial.begin(115200);
+   
   LoadSettings();
   LedPanel = new WS2812B_LedMatrix();
   LedPanel->setMirrorMode(MirrorMode);
@@ -1102,34 +936,8 @@ void setup() {
   init_AD();
 
   testWiresOnByOne();
-
-  //esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-  if (wakeup_reason != ESP_SLEEP_WAKEUP_UNDEFINED) {
-      // Woke from deep sleep
-      returnFromDeepSleep();
-      bReturnFromSleep = true;
-      WiFi.mode(WIFI_OFF);
-      btStop();
-    
-      Serial.println("returning from sleep");
+  SetupNetworkStuff();
       
-      // Load settings when waking from sleep
-      LoadSettings();
-      
-  } else {
-      // Power-on reset or other reset
-      SetupNetworkStuff();
-  }
-  
-    testWiresOnByOne();
-    // Check for calibration
-    //PreferencesWrapper testerpreferences;
-    //testerpreferences.begin("Settings", false);
-    //IdleTimeToSleep = testerpreferences.getInt("TimeToSleep",90000);  // go to sleep after 90 seconds if no wires are plugged in
-    TimeToDeepSleep = millis()+IdleTimeToSleep;
-    //testerpreferences.end();
-    
     // Perform initial threshold adjustment after ADC initialization and settings load
     AdjustThreasholdForRealV();
     
@@ -1152,11 +960,10 @@ void loop() {
   // Always run serial terminal
   serialTerminal.loop();
   
-  if(!bReturnFromSleep){
-    ElegantOTA.loop();
-    esp_task_wdt_reset();
-    terminal.loop(); // WebTerminal only when not returning from sleep
-  }
+  
+  ElegantOTA.loop();
+  esp_task_wdt_reset();
+  terminal.loop(); 
   esp_task_wdt_reset();
 }
 

@@ -1,5 +1,6 @@
 #include "SettingsManager.h"
 
+
 static uint32_t hashKey(const String& key) {
     uint32_t hash = 5381;
     for (int i = 0; i < key.length(); i++) {
