@@ -111,37 +111,43 @@ bool delayAndTestWirePluggedInFoil( long delay){
 long returntime = millis() + delay;
   while(millis() < returntime){
     esp_task_wdt_reset();
-    testWiresOnByOne();  
+      testWiresOnByOne();
+      if(WirePluggedInFoil())
+        return true;
   }
   return false;
-
 }
 
 
 void DoFoilTest() {
   int timeout = FOIL_TEST_TIMEOUT;
   testWiresOnByOne();
-  while(!WirePluggedIn()){
-  esp_task_wdt_reset();
-  LedPanel->Draw_F(LedPanel->m_White);
-  while((testArBr()<myRefs_Ohm[4]));
-  // Check if valid or non-valid test
-  if(testArCl()<myRefs_Ohm[5])
-    LedPanel->SetFullMatrix(LedPanel->m_Green);
-  else
-   LedPanel->SetFullMatrix(LedPanel->m_White);
-  esp_task_wdt_reset();
-  if(delayAndTestWirePluggedInFoil(1000))
-    break;
-  esp_task_wdt_reset();
-  if(testArBr()<myRefs_Ohm[4]){
-    LedPanel->ClearAll();
+  while(!WirePluggedInFoil()){
+    esp_task_wdt_reset();
     LedPanel->Draw_F(LedPanel->m_White);
-    LedPanel->myShow();
-    timeout = FOIL_TEST_TIMEOUT;
+    while((testArBr()<myRefs_Ohm[4]));
+    // Check if valid or non-valid test
+    if(testArCl()<myRefs_Ohm[5])
+      LedPanel->SetFullMatrix(LedPanel->m_Green);
+    else
+      LedPanel->SetFullMatrix(LedPanel->m_White);
+    esp_task_wdt_reset();
+    
+    if(delayAndTestWirePluggedInFoil(1000)){
+      Serial.println("Wire plugged in during foil light, breaking out");
+      break;
+    }
+    esp_task_wdt_reset();
+    if(testArBr()<myRefs_Ohm[4]){
+      LedPanel->ClearAll();
+      LedPanel->Draw_F(LedPanel->m_White);
+      LedPanel->myShow();
+      timeout = FOIL_TEST_TIMEOUT;
+    }
+    testWiresOnByOne();
+    
   }
-  testWiresOnByOne();
-  }
+  Serial.println("Wire plugged in during foil test, leaving");
   LedPanel->ClearAll();
   LedPanel->myShow();
 }
