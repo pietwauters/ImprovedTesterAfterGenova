@@ -90,7 +90,7 @@ void WS2812B_LedMatrix::SequenceTest(){
   for(int i = 0; i<NUMPIXELS; i++){
     m_pixels->setPixelColor(m_transformFunc(i),m_Red);
     m_pixels->show();
-    delay(2*animationspeed);
+    delay(animationspeed);
   }
   ClearAll();
   m_pixels->show();
@@ -372,4 +372,46 @@ void WS2812B_LedMatrix::Draw_F(uint32_t theColor){
     m_pixels->setPixelColor(m_transformFunc(Letter_F[i]),theColor);
   }
   m_pixels->show();
+}
+
+
+void WS2812B_LedMatrix::ConfigureBlinking(int PixelNr, uint32_t theColor, int OnTime, int OffTime, int Repeat){
+    m_BlinkingPixel = PixelNr; // -1 means no blinking
+    m_BlinkingColor = theColor;
+    m_BlinkingOnTime = OnTime;
+    m_BlinkingOffTime = OffTime;
+    m_BlinkingRepeat = Repeat; // 0 means infinite blinking
+    m_BlinkingState = false;
+}  
+
+void WS2812B_LedMatrix::Blink() {
+  
+  if (m_BlinkingPixel < 0) return; // No blinking configured 
+  long currentTime = millis();
+  if(m_BlinkingNextTimeToChange > currentTime)
+    return;
+
+  if(m_BlinkingState) {
+    // Turn off the blinking pixel
+    m_pixels->setPixelColor(m_BlinkingPixel, m_Off);
+    m_BlinkingState = false;
+   m_BlinkingNextTimeToChange = currentTime + m_BlinkingOffTime;
+  } else {
+    // Turn on the blinking pixel     
+    m_pixels->setPixelColor(m_BlinkingPixel, m_BlinkingColor);
+    m_BlinkingNextTimeToChange = currentTime + m_BlinkingOnTime;
+    m_BlinkingState = true;
+  }
+  m_pixels->show();
+
+}
+
+void WS2812B_LedMatrix::RestartBlink(){
+
+  m_BlinkingState = true;
+  m_BlinkingNextTimeToChange = millis() + m_BlinkingOnTime; // Start with off state
+  if (m_BlinkingPixel >= 0) {
+    m_pixels->setPixelColor(m_BlinkingPixel, m_BlinkingColor); // Ensure pixel is off initially
+    m_pixels->show();
+  }   
 }

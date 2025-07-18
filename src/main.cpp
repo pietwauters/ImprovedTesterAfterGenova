@@ -587,7 +587,20 @@ State_t State = Waiting;
 
 
 
-
+void docommonreturnfromspecialmode(){
+  State = Waiting;
+  esp_task_wdt_reset();
+  LedPanel->ClearAll();
+  LedPanel->RestartBlink();
+  for(int i= 0; i < 25; i++)
+  {
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+    LedPanel->Blink();
+    esp_task_wdt_reset();
+  }
+  LedPanel->ClearAll();
+  testWiresOnByOne();
+}
 
 
 void TesterHandler(void *parameter)
@@ -596,6 +609,7 @@ void TesterHandler(void *parameter)
   while(true)
   {
     if(DoCalibration){
+      LedPanel->ClearAll();
       Calibrate();
     }
 
@@ -604,31 +618,24 @@ void TesterHandler(void *parameter)
     {
         // CRITICAL: Always update measurements first!
         testWiresOnByOne();
-        
+        LedPanel->Blink();
         if(testArCr()<160){
           State = EpeeTesting;
           DoEpeeTest();
-          State = Waiting;
-          esp_task_wdt_reset();
-          vTaskDelay(1000 / portTICK_PERIOD_MS);
-          esp_task_wdt_reset();
+          docommonreturnfromspecialmode();
         }
         else{
           if(testArBr()<160){
+            LedPanel->ClearAll();
             DoFoilTest();
-            State = Waiting;
-            esp_task_wdt_reset();
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-            esp_task_wdt_reset();
+            docommonreturnfromspecialmode();
             
           }
           else{
             if(testBrCr()<160){
+              
               DoLameTest();
-              State = Waiting;
-              esp_task_wdt_reset();
-              vTaskDelay(1000 / portTICK_PERIOD_MS);
-              esp_task_wdt_reset();
+              docommonreturnfromspecialmode();
               
             }
           }
@@ -919,13 +926,14 @@ void setup() {
   // put your setup code here, to run once:
   setCpuFrequencyMhz(240); // Set CPU frequency to 240 MHz
   Serial.begin(115200);
-   
+  
   LoadSettings();
   LedPanel = new WS2812B_LedMatrix();
   LedPanel->setMirrorMode(MirrorMode);
   LedPanel->begin();
   LedPanel->ClearAll();
-  
+  LedPanel->SequenceTest(); 
+  LedPanel->ConfigureBlinking(12, LedPanel->m_Orange, 120, 1000, 0);
   
   // Setup serial terminal first, before other initialization
   setupSerialTerminal();

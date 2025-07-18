@@ -75,6 +75,10 @@ class WS2812B_LedMatrix
         void Draw_E(uint32_t theColor);
         void Draw_F(uint32_t theColor);
         void SequenceTest();
+        void ConfigureBlinking(int PixelNr, uint32_t theColor, int OnTime = 100, int OffTime = 100, int Repeat = 0);    
+        void Blink();
+        void RestartBlink();
+        
         uint32_t   m_Red;
         uint32_t   m_Purple;
         uint32_t   m_Green;
@@ -98,10 +102,14 @@ class WS2812B_LedMatrix
         uint8_t m_Brightness = BRIGHTNESS_NORMAL;
         bool m_Loudness = true;
         int animationspeed = 100;
-
-
         QueueHandle_t queue = NULL;
-
+        int m_BlinkingPixel = -1; // -1 means no blinking
+        uint32_t m_BlinkingColor = 0;
+        int m_BlinkingOnTime = 100;
+        int m_BlinkingOffTime = 100;
+        int m_BlinkingRepeat = 0; // 0 means infinite blinking
+        bool m_BlinkingState = false;
+        long m_BlinkingNextTimeToChange = 0;
 };
 
 #endif // WS2812B_LEDMATRIX_H
