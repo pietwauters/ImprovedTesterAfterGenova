@@ -216,9 +216,23 @@ bool Tester::delayAndTestWirePluggedInFoil(long delay) {
     return false;
 }
 
+bool Tester::delayAndTestWirePluggedInEpee(long delay) {
+    long returnTime = millis() + delay;
+    while (millis() < returnTime) {
+        esp_task_wdt_reset();
+        testWiresOnByOne();
+        if (WirePluggedInEpee()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+
+
 // Move all your existing DoEpeeTest, DoFoilTest, DoLameTest, etc. methods here
 // Just rename them to doEpeeTest, doFoilTest, doLameTest, etc. and make them private
-
+/*
 void Tester::doEpeeTest() {
     // Your existing DoEpeeTest code
     Serial.println("In Epee testing");
@@ -259,7 +273,91 @@ void Tester::doEpeeTest() {
     }
     LedPanel->ClearAll();
     LedPanel->myShow();
+}*/
+
+
+void Tester::doEpeeTest() {
+    testWiresOnByOne();
+
+    while (!WirePluggedInEpee()) {
+        esp_task_wdt_reset();
+        int arCr = testArCr();
+        int arCl = testArCl();
+        int arBr = testArBr();
+        int brCr = testBrCr();
+
+        // Case 1: Both ArBr and BrCr > 1500, ArCl > 600
+        if ((arBr > 1500 && brCr > 1500) && arCl > 600) {
+            // Show color based on ArCr
+            if (arCr < myRefs_Ohm[2]) {
+                LedPanel->SetInner9(LedPanel->m_Green);
+            } else if (arCr < myRefs_Ohm[4]) {
+                LedPanel->SetInner9(LedPanel->m_Yellow);
+            } else if (arCr < 600) {
+                LedPanel->SetInner9(LedPanel->m_Red);
+            } else {
+                // Above 600, don't show anything
+                LedPanel->ClearAll();
+                LedPanel->Draw_E(LedPanel->m_White);
+                LedPanel->myShow();
+                testWiresOnByOne();
+                continue;
+            }
+            LedPanel->myShow();
+            if (delayAndTestWirePluggedInEpee(1000)) {
+                break;
+            }
+            //LedPanel->ClearAll();
+            LedPanel->myShow();
+        }
+        // Case 2: Both ArBr and BrCr > 1500, ArCl < 600
+        else if ((arBr > 1500 && brCr > 1500) && arCl < 600) {
+            // Use thresholds divided by 2
+            if (arCr < myRefs_Ohm[1]) {
+                LedPanel->SetInner9(LedPanel->m_Green);
+            } else if (arCr < myRefs_Ohm[2]) {
+                LedPanel->SetInner9(LedPanel->m_Yellow);
+            } else if (arCr < 300) {
+                LedPanel->SetInner9(LedPanel->m_Red);
+            } else {
+                LedPanel->ClearAll();
+                LedPanel->Draw_E(LedPanel->m_White);
+                LedPanel->myShow();
+                testWiresOnByOne();
+                continue;
+            }
+            LedPanel->myShow();
+            if (delayAndTestWirePluggedInEpee(1000)) {
+                break;
+            }
+            //LedPanel->ClearAll();
+            LedPanel->myShow();
+        }
+        // Case 3: ArBr < 1500 or BrCr < 1500 (unwanted short)
+        else if (arBr < 1500 || brCr < 1500) {
+            LedPanel->ClearAll();
+            if (arBr < 1500) {
+                LedPanel->AnimateArBrConnection();
+            }
+            if (brCr < 1500) {
+                LedPanel->AnimateBrCrConnection();
+            }
+        }
+        // All other cases: draw white E
+        else {
+            LedPanel->ClearAll();
+            LedPanel->Draw_E(LedPanel->m_White);
+            LedPanel->myShow();
+        }
+
+        esp_task_wdt_reset();
+        testWiresOnByOne();
+    }
+    LedPanel->ClearAll();
+    LedPanel->myShow();
 }
+
+
 
 void Tester::doFoilTest() {
     testWiresOnByOne();

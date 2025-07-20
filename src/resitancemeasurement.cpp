@@ -273,6 +273,23 @@ for(int Nr=0; Nr<3;Nr++)
   return false;
 }
 
+
+bool WirePluggedInEpee(int threashold){ 
+for(int Nr=0; Nr<3;Nr++)
+  {
+    for(int j=0;j<3;j++){
+      if(!((Nr == 1 && j == 0) ||(Nr == 0 && j == 0))) // Skip the Lamé wire to A or C
+      {
+        if(measurements[Nr][j] < threashold){
+          return true;
+        }
+      }
+      
+    }
+  }
+  return false;
+}
+
 // Checks straigth connections only. Fills in measurement[i][i]
 // Returns true if all connections have a resistance lower than 10 Ohm
 bool testStraightOnly(int threashold) {

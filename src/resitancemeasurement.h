@@ -21,6 +21,7 @@ int getSample(adc1_channel_t pin);
 void testWiresOnByOne();
 bool WirePluggedIn(int threashold = 160);
 bool WirePluggedInFoil(int threashold = 160);
+bool WirePluggedInEpee(int threashold = 160);
 bool testStraightOnly(int threashold = 160);
 int testArBr();
 int testArCr();

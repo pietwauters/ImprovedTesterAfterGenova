@@ -44,6 +44,7 @@ private:
     void doCommonReturnFromSpecialMode();
     bool delayAndTestWirePluggedIn(long delay);
     bool delayAndTestWirePluggedInFoil(long delay);
+    bool delayAndTestWirePluggedInEpee(long delay);
     void doEpeeTest();
     void doFoilTest();
     void doLameTest();
