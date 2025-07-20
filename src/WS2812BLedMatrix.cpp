@@ -415,3 +415,12 @@ void WS2812B_LedMatrix::RestartBlink(){
     m_pixels->show();
   }   
 }
+
+void WS2812B_LedMatrix::SetInner9(uint32_t theColor){
+  ClearAll();
+  m_pixels->fill(theColor,6,3);
+  m_pixels->fill(theColor,16,3);
+  m_pixels->fill(theColor,11,3);
+  myShow();
+
+}

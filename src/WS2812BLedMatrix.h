@@ -62,6 +62,7 @@ class WS2812B_LedMatrix
         void begin();
         void SetLine(int i, uint32_t theColor);
         void SetFullMatrix(uint32_t theColor){m_pixels->fill(theColor,0,NUMPIXELS);myShow();};
+        void SetInner9(uint32_t theColor);
         void SetSwappedLines(int i, int j);
         void AnimateSwap(int i, int j);
         void AnimateShort(int i, int j);

@@ -35,17 +35,6 @@ using namespace std;
 #include "RTOSUtilities.h"  
 
 
-TaskHandle_t TesterTask;
-
-
-enum State_t {Waiting, WireTesting_1,WireTesting_2, FoilTesting, EpeeTesting};
-
-
-#define FOIL_TEST_TIMEOUT 12
-#define WIRE_TEST_1_TIMEOUT 2
-#define NO_WIRES_PLUGGED_IN_TIMEOUT 2
-
-
 
 int myRefs_Ohm[]={0,1,2,3,4,5,6,7,8,9,10};
 int StoredRefs_ohm[] = {0,1,2,3,4,5,6,7,8,9,10};
@@ -65,8 +54,7 @@ USBSerialTerminal serialTerminal; // Add this global variable
 
 
 WS2812B_LedMatrix *LedPanel;
-#define MY_ATTENUATION  ADC_ATTEN_DB_11
-//#define MY_ATTENUATION  ADC_ATTEN_DB_6
+
 
 // Forward declarations
 void synchronizeThresholdValues();
@@ -94,202 +82,6 @@ public:
 
 // Create a single global command handler instance
 CommonCommandHandler commandHandler;
-
-bool delayAndTestWirePluggedIn( long delay){
-long returntime = millis() + delay;
-  while(millis() < returntime){
-    esp_task_wdt_reset();
-    testWiresOnByOne();
-    if(WirePluggedIn())
-      return true;
-  }
-  return false;
-
-}
-
-bool delayAndTestWirePluggedInFoil( long delay){
-long returntime = millis() + delay;
-  while(millis() < returntime){
-    esp_task_wdt_reset();
-      testWiresOnByOne();
-      if(WirePluggedInFoil())
-        return true;
-  }
-  return false;
-}
-
-
-void DoFoilTest() {
-  int timeout = FOIL_TEST_TIMEOUT;
-  testWiresOnByOne();
-  while(!WirePluggedInFoil()){
-    esp_task_wdt_reset();
-    LedPanel->Draw_F(LedPanel->m_White);
-    while((testArBr()<myRefs_Ohm[4]));
-    // Check if valid or non-valid test
-    if(testArCl()<myRefs_Ohm[5])
-      LedPanel->SetFullMatrix(LedPanel->m_Green);
-    else
-      LedPanel->SetFullMatrix(LedPanel->m_White);
-    esp_task_wdt_reset();
-    
-    if(delayAndTestWirePluggedInFoil(1000)){
-      Serial.println("Wire plugged in during foil light, breaking out");
-      break;
-    }
-    esp_task_wdt_reset();
-    if(testArBr()<myRefs_Ohm[4]){
-      LedPanel->ClearAll();
-      LedPanel->Draw_F(LedPanel->m_White);
-      LedPanel->myShow();
-      timeout = FOIL_TEST_TIMEOUT;
-    }
-    testWiresOnByOne();
-    
-  }
-  Serial.println("Wire plugged in during foil test, leaving");
-  LedPanel->ClearAll();
-  LedPanel->myShow();
-}
-
-void DoLameTest() {
-  bool bShowingRed = false;
-  testWiresOnByOne();
-  while(!WirePluggedIn()){
-  esp_task_wdt_reset();
-  if(testBrCr()< myRefs_Ohm[5]){
-    LedPanel->DrawDiamond(LedPanel->m_Green);
-    bShowingRed = false;
-    while((testBrCr()<myRefs_Ohm[5])){esp_task_wdt_reset();};
-  }
-  else{
-    if(testBrCr()< myRefs_Ohm[10]){
-    LedPanel->DrawDiamond(LedPanel->m_Yellow);
-    bShowingRed = false;
-    while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
-    }
-  }
-  
-  if(!bShowingRed)
-    LedPanel->DrawDiamond(LedPanel->m_Red);
-  bShowingRed = true;
-  esp_task_wdt_reset();
- 
-  if(delayAndTestWirePluggedIn(250))
-    break;
-  esp_task_wdt_reset();
-  testWiresOnByOne();
-  }
-  LedPanel->ClearAll();
-  LedPanel->myShow();
-}
-
-void DoEpeeTest() {
-  Serial.println("In Epee testing");
-  bool bArCr = false;
-  bool bArBr = false;
-  bool bBrCr = false;
-  testWiresOnByOne();
-  
-  while(!WirePluggedIn()){
-    bArCr = (testArCr()<myRefs_Ohm[4]);
-    bArBr = (testArBr()<myRefs_Ohm[10]);
-    bBrCr = (testBrCr()<myRefs_Ohm[10]);
-    
-    esp_task_wdt_reset();
-    if(bArCr && !bArBr && !bBrCr){
-      LedPanel->SetFullMatrix(LedPanel->m_Green);
-      if(delayAndTestWirePluggedIn(1000))
-        break;
-      esp_task_wdt_reset();
-      if(testArCr()>myRefs_Ohm[4]){
-        LedPanel->ClearAll();
-        LedPanel->myShow();
-      }
-    }
-    if(bArBr){
-      LedPanel->ClearAll();
-      LedPanel->AnimateArBrConnection();
-    }
-    if(bBrCr){
-      LedPanel->ClearAll();
-      LedPanel->AnimateBrCrConnection();
-    }
-    if(!(bArCr || bArBr || bBrCr)){
-      LedPanel->Draw_E(LedPanel->m_Green);
-    }
-    esp_task_wdt_reset();
-    testWiresOnByOne();
-  }
-  LedPanel->ClearAll();
-  LedPanel->myShow();
-
-}
-
-
-
-bool AnimateSingleWire(int i)
-{
-  bool bOK= false;
-    if(measurements[i][i] < myRefs_Ohm[10])
-    {
-        if((measurements[i][(i+1)%3]> 200 ) && (measurements[i][(i+2)%3] > 200))
-        {
-          // OK
-          int level = 2;
-          if(measurements[i][i] <= myRefs_Ohm[3])
-          level = 1;
-          if(measurements[i][i] <= myRefs_Ohm[1])
-          level  = 0;
-
-
-          LedPanel->AnimateGoodConnection(i, level);
-          bOK= true;
-        }
-        else
-        {
-            // short
-            if(measurements[i][(i+1)%3]< 160)
-              LedPanel->AnimateShort(i, (i+1)%3);
-            else
-            if(measurements[i][(i+2)%3] < 160)
-              LedPanel->AnimateShort(i, (i+2)%3);
-        }
-    }
-    else
-    {
-        if((measurements[i][(i+1)%3]>160) && (measurements[i][(i+2)%3]>160))
-        {
-            // Simply broken
-            LedPanel->AnimateBrokenConnection(i);
-        }
-        else
-        {
-          if(measurements[i][(i+1)%3]<160)
-            LedPanel->AnimateWrongConnection(i,(i+1)%3);
-          if(measurements[i][(i+2)%3] < 160)
-            LedPanel->AnimateWrongConnection(i,(i+2)%3);
-        }
-    }
-  return bOK;
-}
-
-bool DoQuickCheck(){
-bool bAllGood = true;
-  testWiresOnByOne();
-  for(int i = 0; i < 3; i++)
-  {
-    bAllGood &= AnimateSingleWire(i);
-  }
-  esp_task_wdt_reset();
-  vTaskDelay(500 / portTICK_PERIOD_MS);
-  esp_task_wdt_reset();
-  LedPanel->ClearAll();
-  esp_task_wdt_reset();
-  vTaskDelay(300 / portTICK_PERIOD_MS);
-  esp_task_wdt_reset();
-  return bAllGood;
-}
 
 
 ITerminal* currentTerminal = nullptr;
@@ -571,6 +363,7 @@ void Calibrate()
         
         // Calculate best ADC values using different methods
         long bestADCValue = calculateBestADCValue(SortedSamples[i]);
+        
         long trimmedMean = calculateTrimmedMean(SortedSamples[i], 0.1f); // Trim 10% from each end
         
         // Show mode in the output
@@ -586,140 +379,7 @@ void Calibrate()
     }
 }
 
-int timetoswitch = WIRE_TEST_1_TIMEOUT;
-int NoWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
-bool bAllGood = true;
-State_t State = Waiting;
 
-
-
-void docommonreturnfromspecialmode(){
-  State = Waiting;
-  esp_task_wdt_reset();
-  LedPanel->ClearAll();
-  LedPanel->RestartBlink();
-  for(int i= 0; i < 25; i++)
-  {
-    vTaskDelay(50 / portTICK_PERIOD_MS);
-    LedPanel->Blink();
-    esp_task_wdt_reset();
-  }
-  LedPanel->ClearAll();
-  testWiresOnByOne();
-}
-
-
-void TesterHandler(void *parameter)
-{
-    
-  while(true)
-  {
-    if(DoCalibration){
-      LedPanel->ClearAll();
-      Calibrate();
-    }
-
-    esp_task_wdt_reset();
-    if(Waiting == State)
-    {
-        // CRITICAL: Always update measurements first!
-        testWiresOnByOne();
-        LedPanel->Blink();
-        if(testArCr()<160){
-          State = EpeeTesting;
-          DoEpeeTest();
-          docommonreturnfromspecialmode();
-        }
-        else{
-          if(testArBr()<160){
-            LedPanel->ClearAll();
-            DoFoilTest();
-            docommonreturnfromspecialmode();
-            
-          }
-          else{
-            if(testBrCr()<160){
-              
-              DoLameTest();
-              docommonreturnfromspecialmode();
-              
-            }
-          }
-        }
- esp_task_wdt_reset();       
-        if(WirePluggedIn()){
-          State = WireTesting_1;
-          NoWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
-          timetoswitch = WIRE_TEST_1_TIMEOUT;
-          
-        }
-        
-        esp_task_wdt_reset();
-        
-    }
-
-    esp_task_wdt_reset();
-    if(WireTesting_1 == State)
-    {
-      
-      
-      testWiresOnByOne();
-      bAllGood = DoQuickCheck();
-      if(bAllGood){
-        timetoswitch--;
-      }
-      else{
-        timetoswitch = WIRE_TEST_1_TIMEOUT;
-        if(!WirePluggedIn())
-          NoWireTimeout--;
-        else {
-          NoWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
-        }
-        if(!NoWireTimeout) {
-          State = Waiting;
-          
-        }
-      }
-      
-      if(!timetoswitch){
-        for(int i = 0; i< 5; i+=2){
-          LedPanel->SetLine(i, LedPanel->m_Green);
-        }
-        LedPanel->myShow();
-        esp_task_wdt_reset();
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        esp_task_wdt_reset();
-        State = WireTesting_2;
-      }
-    }
-    
-    if(WireTesting_2 == State)
-    {
-      
-      
-      for(int i= 100000;i>0;i--){
-        esp_task_wdt_reset();
-        if(!testStraightOnly())
-          i = 0;
-      }
-
-      LedPanel->ClearAll();
-      LedPanel->myShow();
-      for(int i = 0; i < 3; i++)
-      {
-        bAllGood &= AnimateSingleWire(i);
-      }
-      esp_task_wdt_reset();
-      vTaskDelay(5000 / portTICK_PERIOD_MS);
-      esp_task_wdt_reset();
-      timetoswitch = 3;
-      LedPanel->ClearAll();
-      LedPanel->myShow();
-      State = Waiting;
-      
-    }
-  }
-}
 
 bool CalibrationEnabled;
 
@@ -928,69 +588,6 @@ void setupSerialTerminal() {
 }
 
 
-void setup() {
-  // put your setup code here, to run once:
-  setCpuFrequencyMhz(240); // Set CPU frequency to 240 MHz
-  Serial.begin(115200);
-  
-  LoadSettings();
-  LedPanel = new WS2812B_LedMatrix();
-  LedPanel->setMirrorMode(MirrorMode);
-  LedPanel->begin();
-  LedPanel->ClearAll();
-  LedPanel->SequenceTest(); 
-  LedPanel->ConfigureBlinking(12, LedPanel->m_Orange, 120, 1000, 0);
-  
-  // Setup serial terminal first, before other initialization
-  setupSerialTerminal();
-  
-  esp_task_wdt_init(20, true);
-  esp_task_wdt_add(NULL);
-  Serial.printf("CPU Freq: %d MHz\n", getCpuFrequencyMhz());
-  init_AD();
-
-  testWiresOnByOne();
-  SetupNetworkStuff();
-      
-    // Perform initial threshold adjustment after ADC initialization and settings load
-    AdjustThreasholdForRealV();
-    
-    xTaskCreatePinnedToCore(
-            TesterHandler,        /* Task function. */
-            "TesterHandler",      /* String with name of task. */
-            16384,                            /* Stack size in words. */
-            NULL,                            /* Parameter passed as input of the task */
-            0,                                /* Priority of the task. */
-            &TesterTask,           /* Task handle. */
-            1);
-    esp_task_wdt_add(TesterTask);
-    
-    
-}
-
-void loop() {
-  vTaskDelay(10 / portTICK_PERIOD_MS);
-  
-  // Always run serial terminal
-  serialTerminal.loop();
-  
-  
-  ElegantOTA.loop();
-  esp_task_wdt_reset();
-  terminal.loop(); 
-  esp_task_wdt_reset();
-}
-
-
-extern "C" void app_main() {
-    // Call Arduino setup and loop
-    initArduino(); // Initialize Arduino if needed
-    setup(); 
-    //printTasks(); // Print tasks during setup      // Call the Arduino setup function
-    while (true) {
-        loop();     // Call the Arduino loop function
-    }
-}
 
 // Move the command handler implementations here (before they're used)
 void handleEchoCommand(ITerminal* term, const std::vector<String>& args) {
@@ -1016,4 +613,74 @@ void handleHelpCommand(ITerminal* term, const std::vector<String>& args) {
     term->send("  list                 - Show available settings");
     term->send("  set <name> <value>   - Change a setting");
     term->send("  help                 - Show this help message");
+}
+
+#include "tester.h"
+
+// Global tester instance
+Tester* tester = nullptr;
+
+void setup() {
+    // put your setup code here, to run once:
+    setCpuFrequencyMhz(240); // Set CPU frequency to 240 MHz
+    Serial.begin(115200);
+    
+    LoadSettings();
+    LedPanel = new WS2812B_LedMatrix();
+    LedPanel->setMirrorMode(MirrorMode);
+    LedPanel->begin();
+    LedPanel->ClearAll();
+    LedPanel->SequenceTest(); 
+    LedPanel->ConfigureBlinking(12, LedPanel->m_Orange, 120, 1000, 0);
+    
+    // Setup serial terminal first, before other initialization
+    setupSerialTerminal();
+    
+    esp_task_wdt_init(20, true);
+    esp_task_wdt_add(NULL);
+    Serial.printf("CPU Freq: %d MHz\n", getCpuFrequencyMhz());
+    init_AD();
+
+    testWiresOnByOne();
+    SetupNetworkStuff();
+        
+    // Create the tester instance
+    tester = new Tester(LedPanel);
+    
+    // Start the tester task
+    tester->begin();
+    
+    // Perform initial threshold adjustment after ADC initialization and settings load
+    AdjustThreasholdForRealV();
+
+    // Set the reference values after loading settings
+    tester->setReferenceValues(myRefs_Ohm);  // Pass the int array
+    // Remove the idle task from the WDT (do this for both cores)
+    esp_task_wdt_delete(xTaskGetIdleTaskHandleForCPU(0));
+    esp_task_wdt_delete(xTaskGetIdleTaskHandleForCPU(1));
+    
+}
+
+
+void loop() {
+  vTaskDelay(10 / portTICK_PERIOD_MS);
+  
+  // Always run serial terminal
+  serialTerminal.loop();
+  esp_task_wdt_reset();
+  ElegantOTA.loop();
+  esp_task_wdt_reset();
+  terminal.loop(); 
+  esp_task_wdt_reset();
+}
+
+
+extern "C" void app_main() {
+    // Call Arduino setup and loop
+    initArduino(); // Initialize Arduino if needed
+    setup(); 
+    //printTasks(); // Print tasks during setup      // Call the Arduino setup function
+    while (true) {
+        loop();     // Call the Arduino loop function
+    }
 }
