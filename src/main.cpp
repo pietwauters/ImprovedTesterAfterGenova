@@ -44,6 +44,7 @@ volatile bool DoCalibration = false;
 bool MirrorMode = true;  // Default to no mirror mode
 int CalibrationDisplayChannel = 0;  // Default to channel 0
 bool CalibrationAutoMode = false;  // Auto mode flag
+int Brightness = BRIGHTNESS_NORMAL; // Default brightness level
 
 
 AsyncWebServer server(80);
@@ -540,7 +541,6 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
 
 
 
-
 void LoadSettings() {
   // Register settings
 
@@ -550,7 +550,7 @@ void LoadSettings() {
   settings.addInt("Vmax", "Vmax in mV", &Vmax);
   settings.addString("name", "Device Name", &deviceName);
   settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
- 
+  settings.addInt("Brightness", "Display brightness 0-255", &Brightness);
   settings.begin("Settings");        // for Preferences namespace
   settings.load();
   
@@ -632,7 +632,8 @@ void setup() {
     LedPanel->ClearAll();
     LedPanel->SequenceTest(); 
     LedPanel->ConfigureBlinking(12, LedPanel->m_Orange, 120, 1000, 0);
-    
+    LedPanel->SetBrightness((uint8_t)Brightness); // Set the brightness level for the LED panel
+
     // Setup serial terminal first, before other initialization
     setupSerialTerminal();
     
