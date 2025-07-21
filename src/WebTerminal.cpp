@@ -1,18 +1,17 @@
 #include "WebTerminal.h"
+
 #include "terminal.html.h"  // HTML page
 
-WebTerminal::WebTerminal(AsyncWebServer& srv)
-: ws("/ws"), server(srv) {}
+WebTerminal::WebTerminal(AsyncWebServer& srv) : ws("/ws"), server(srv) {}
 
 void WebTerminal::begin() {
     server.addHandler(&ws);
 
-    server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", FPSTR(terminal_html));
-    });
+    server.on("/", HTTP_GET,
+              [this](AsyncWebServerRequest* request) { request->send(200, "text/html", FPSTR(terminal_html)); });
 
-    ws.onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client,
-                      AwsEventType type, void *arg, uint8_t *data, size_t len) {
+    ws.onEvent([this](AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data,
+                      size_t len) {
         if (type == WS_EVT_DATA) {
             AwsFrameInfo* info = (AwsFrameInfo*)arg;
             if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
@@ -26,9 +25,7 @@ void WebTerminal::begin() {
     });
 }
 
-void WebTerminal::loop() {
-    
-}
+void WebTerminal::loop() {}
 
 void WebTerminal::send(const String& msg) {
     for (auto& client : ws.getClients()) {
@@ -52,7 +49,8 @@ void WebTerminal::registerCommand(const String& name, CommandCallback callback) 
 }
 
 void WebTerminal::handleCommand(const String& input) {
-    if (input.length() == 0) return;
+    if (input.length() == 0)
+        return;
 
     int start = 0;
     int end = input.indexOf(' ');
@@ -75,6 +73,4 @@ void WebTerminal::handleCommand(const String& input) {
     printf("[!] Unknown command: %s\n", cmd.c_str());
 }
 
-void WebTerminal::println(const String& message) {
-    send(message + "\n");
-}
+void WebTerminal::println(const String& message) { send(message + "\n"); }

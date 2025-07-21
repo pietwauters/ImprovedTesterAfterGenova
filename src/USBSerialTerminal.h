@@ -1,32 +1,33 @@
 #ifndef USBSERIALTERMINAL_H
 #define USBSERIALTERMINAL_H
 
-#include "ITerminal.h"
+#include <functional>
 #include <map>
 #include <vector>
-#include <functional>
+
+#include "ITerminal.h"
 
 typedef std::function<void(ITerminal*, const std::vector<String>&)> CommandCallback;
 
 class USBSerialTerminal : public ITerminal {
-private:
+   private:
     std::map<String, CommandCallback> commands;
     String inputBuffer;
     bool echoEnabled;
     String prompt;
-    
+
     void processCommand(const String& command);
     std::vector<String> parseCommand(const String& command);
     void showPrompt();
 
-public:
+   public:
     USBSerialTerminal();
-    
+
     // ITerminal interface implementation
     void printf(const char* format, ...) override;
     void send(const String& message) override;
     void println(const String& message) override;
-    
+
     // Terminal management
     void begin();
     void loop();

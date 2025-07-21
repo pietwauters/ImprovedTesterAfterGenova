@@ -50,7 +50,7 @@
 #define IOValues_al_cl 1
 #define IOValues_br_cr 16
 #define IOValues_br_bl 16
-#define IOValues_br_cl 16 
+#define IOValues_br_cl 16
 #define IOValues_br_piste 16
 #define IOValues_bl_cl 2
 #define IOValues_bl_piste 2

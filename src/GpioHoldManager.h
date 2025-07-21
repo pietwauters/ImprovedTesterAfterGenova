@@ -1,12 +1,11 @@
 #pragma once
 #include <vector>
+
 #include "driver/rtc_io.h"
 
 class GpioHoldManager {
-public:
-    void add(gpio_num_t pin) {
-        pins.push_back(pin);
-    }
+   public:
+    void add(gpio_num_t pin) { pins.push_back(pin); }
 
     void enableAll() {
         gpio_deep_sleep_hold_en();
@@ -22,6 +21,6 @@ public:
         }
     }
 
-private:
+   private:
     std::vector<gpio_num_t> pins;
 };

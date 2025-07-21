@@ -1,5 +1,4 @@
-#ifndef GLOBALS_H
-#define GLOBALS_H
+#pragma once
 
 #include <Arduino.h>
 
@@ -17,5 +16,3 @@ extern int testArCr();
 extern int testArBr();
 extern int testBrCr();
 extern bool testStraightOnly(int threshold);
-
-#endif // GLOBALS_H

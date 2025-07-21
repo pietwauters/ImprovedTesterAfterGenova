@@ -1,12 +1,11 @@
-//Copyright (c) Piet Wauters 2022 <piet.wauters@gmail.com>
-#ifndef RESISTANCE_MEASUREMENT_H
-#define RESISTANCE_MEASUREMENT_H
+// Copyright (c) Piet Wauters 2022 <piet.wauters@gmail.com>
+#pragma once
 
 #include <Arduino.h>
+
+#include "Hardware.h"
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
-#include "Hardware.h"
-
 
 // Global variables (extern declarations)
 extern int measurements[3][3];
@@ -30,5 +29,3 @@ int testBrCr();
 bool IsBroken(int Nr, int threashold = 160);
 bool IsSwappedWith(int i, int j, int threashold = 160);
 void init_AD();
-
-#endif // RESISTANCE_MEASUREMENT_H

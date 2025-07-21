@@ -1,10 +1,9 @@
 #include <cmath>
 
 class ModelSolver {
-public:
+   public:
     // Constructor
-    ModelSolver(double Vmax_, double R0_, double a_)
-        : Vmax(Vmax_), R0(R0_), a(a_) {}
+    ModelSolver(double Vmax_, double R0_, double a_) : Vmax(Vmax_), R0(R0_), a(a_) {}
 
     // Compute V(x)
     double compute_V(double x) const {
@@ -22,14 +21,14 @@ public:
 
         double discrim = V * V * R0 * R0 + 4.0 * V * (Vmax - V) * a;
         if (discrim < 0.0) {
-            return NAN; // Should not happen, but just in case
+            return NAN;  // Should not happen, but just in case
         }
 
         double numerator = V * R0 + std::sqrt(discrim);
         double denominator = 2.0 * (Vmax - V);
 
         if (denominator == 0.0) {
-            return NAN; // Should not happen if V < Vmax
+            return NAN;  // Should not happen if V < Vmax
         }
 
         return numerator / denominator;
@@ -45,7 +44,7 @@ public:
     double get_a() const { return a; }
     double get_Vmax() const { return Vmax; }
 
-private:
+   private:
     double Vmax;
     double R0;
     double a;

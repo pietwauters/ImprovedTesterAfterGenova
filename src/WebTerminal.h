@@ -2,12 +2,14 @@
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
+
 #include <functional>
 #include <vector>
+
 #include "ITerminal.h"
 
 class WebTerminal : public ITerminal {
-public:
+   public:
     WebTerminal(AsyncWebServer& server);
 
     void begin();
@@ -21,7 +23,7 @@ public:
 
     void println(const String& message) override;
 
-private:
+   private:
     AsyncWebSocket ws;
     AsyncWebServer& server;
 
