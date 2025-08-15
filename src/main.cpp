@@ -395,12 +395,13 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
     term->printf("===================\n");
 
     term->printf("Integer settings:\n");
-
     term->printf("  R0                  : %d ohm (Total resistance Ron + 2x47)\n", R0);
     term->printf("  Vmax                : %d mV (Maximum voltage)\n", Vmax);
+    term->printf("  Brightness          : %d (Display brightness 1-255)\n", Brightness);
 
     term->printf("\nBoolean settings:\n");
     term->printf("  bCalibrate          : %s (Perform Calibration?)\n", CalibrationEnabled ? "true" : "false");
+    term->printf("  MirrorMode          : %s (Should your LedPanel be mirrored?)\n", MirrorMode ? "true" : "false");
 
     term->printf("\nString settings:\n");
     term->printf("  name                : %s (Device Name)\n", deviceName.c_str());
@@ -430,7 +431,7 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
 void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
     if (args.size() < 2) {
         term->printf("Usage: set <setting_name> <value>\n");
-        term->printf("Available settings: R0, Vmax, bCalibrate, name, myRefs_Ohm\n");
+        term->printf("Available settings: R0, Vmax, bCalibrate, MirrorMode, Brightness, name, myRefs_Ohm\n");
         term->printf("Example: set name \"MyTester\"\n");
         term->printf("Example: set myRefs_Ohm 0,1,2,3,4,5,6,7,8,9,12\n");
         return;
@@ -459,9 +460,28 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
         }
         Vmax = newValue;
         term->printf("✓ Set Vmax = %d mV\n", newValue);
+    } else if (settingName == "Brightness") {
+        int newValue = value.toInt();
+        if (newValue < 1 || newValue > 255) {
+            term->printf("Error: Brightness must be between 1 and 255\n");
+            return;
+        }
+        Brightness = newValue;
+        term->printf("✓ Set Brightness = %d\n", newValue);
 
         // Boolean settings
     } else if (settingName == "bCalibrate") {
+    } else if (settingName == "MirrorMode") {
+        if (value == "true" || value == "1") {
+            MirrorMode = true;
+            term->printf("✓ Set MirrorMode = true\n");
+        } else if (value == "false" || value == "0") {
+            MirrorMode = false;
+            term->printf("✓ Set MirrorMode = false\n");
+        } else {
+            term->printf("Error: MirrorMode must be 'true' or 'false'\n");
+            return;
+        }
         if (value == "true" || value == "1") {
             CalibrationEnabled = true;
             term->printf("✓ Set bCalibrate = true\n");
@@ -539,7 +559,7 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
 
     } else {
         term->printf("Error: Unknown setting '%s'\n", settingName.c_str());
-        term->printf("Available:  R0, Vmax, bCalibrate, name, myRefs_Ohm\n");
+        term->printf("Available:  R0, Vmax, bCalibrate, MirrorMode, Brightness, name, myRefs_Ohm\n");
         return;
     }
 
@@ -557,9 +577,9 @@ void LoadSettings() {
     settings.addIntArray("myRefs_Ohm", "Threshold values from 0 - 10 Ohm", StoredRefs_ohm, 11);
     settings.addInt("R0", "R0 (total resistance (Ron + 2 x 47)", &R0);
     settings.addInt("Vmax", "Vmax in mV", &Vmax);
-    settings.addString("name", "Device Name", &deviceName);
     settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
-    settings.addInt("Brightness", "Display brightness 0-255", &Brightness);
+    settings.addInt("Brightness", "Display brightness 1-255", &Brightness);
+    settings.addString("name", "Device Name", &deviceName);
     settings.begin("Settings");  // for Preferences namespace
     settings.load();
 
