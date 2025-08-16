@@ -3,6 +3,64 @@
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
 
+constexpr int CurrentVersion = 1;
+
+// Empirical resistor calibrator using your proven model:
+// V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
+class EmpiricalResistorCalibrator {
+   public:
+    // Initialize with ADC channel for differential measurement
+    bool begin(adc1_channel_t adc_channel_top, adc1_channel_t adc_channel_bottom);
+
+    // Interactive calibration using multiple known resistors (least squares)
+    bool calibrate_interactively_empirical();
+
+    // Get resistance from differential measurement using empirical model
+    float get_resistance_empirical(float v_diff_measured);
+
+    // Save/load calibration
+    bool save_calibration_to_nvs(const char* nvs_namespace = "emp_cal");
+    bool load_calibration_from_nvs(const char* nvs_namespace = "emp_cal");
+
+    // Measurement functions
+    struct EmpiricalReading {
+        float v_top;
+        float v_bottom;
+        float v_diff;
+        float resistance;
+    };
+
+    EmpiricalReading read_differential_empirical(int samples = 100);
+
+    // Getters for calibration parameters
+    float get_v_gpio() const { return v_gpio; }
+    float get_r1_r2() const { return r1_r2; }
+    float get_correction() const { return correction; }
+
+    // Check if calibrator is properly calibrated
+    bool is_calibrated() const { return v_gpio > 0 && r1_r2 > 0; }
+
+   private:
+    // ADC channels
+    adc1_channel_t channel_top;
+    adc1_channel_t channel_bottom;
+
+    // Empirical model parameters: V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
+    float v_gpio = 0.0f;      // Effective GPIO voltage
+    float r1_r2 = 0.0f;       // Combined fixed resistance
+    float correction = 0.0f;  // Current-dependent correction factor
+
+    // ADC calibration
+    esp_adc_cal_characteristics_t adc_chars;
+
+    // Helper functions
+    float calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction);
+    bool least_squares_fit(float* R_values, float* V_diff_values, int num_points);
+    void wait_for_enter();
+    float read_float_from_uart();  // ESP32-safe float input with WDT reset
+    char read_char_from_uart();    // ESP32-safe char input with WDT reset
+};
+
 class DifferentialResistorCalibrator {
    public:
     // Initialize with top and bottom ADC channels
@@ -31,6 +89,8 @@ class DifferentialResistorCalibrator {
 
     DifferentialReading read_differential(int samples = 8);
     DifferentialReading read_differential_average(int samples = 100);
+    DifferentialReading read_differential_median(int samples = 100);
+    DifferentialReading read_differential_trimmed_mean(int samples = 100, float trim_percent = 0.2f);
 
     // Getters
     float get_vcc() const { return v_gpio; }
@@ -46,7 +106,7 @@ class DifferentialResistorCalibrator {
     float v_gpio = 0.0f;  // Supply voltage
     float r1_eff = 0.0f;  // Effective R1 (47Ω + GPIO Ron + parasitic resistances)
     float r3_eff = 0.0f;  // Effective R3 (47Ω + GPIO Ron + parasitic resistances)
-
+    int Version = CurrentVersion;
     // ADC calibration
     esp_adc_cal_characteristics_t adc_chars;
 

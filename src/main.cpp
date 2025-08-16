@@ -30,6 +30,7 @@ using namespace std;
 #include "GpioHoldManager.h"
 #include "RTOSUtilities.h"
 #include "USBSerialTerminal.h"
+#include "adc_calibrator.h"
 #include "driver/gpio.h"  // Required for gpio_pad_select_gpio()
 #include "driver/rtc_io.h"
 #include "esp_log.h"
@@ -643,7 +644,7 @@ void handleHelpCommand(ITerminal* term, const std::vector<String>& args) {
 
 // Global tester instance
 Tester* tester = nullptr;
-
+EmpiricalResistorCalibrator mycalibrator;
 void setup() {
     // put your setup code here, to run once:
     setCpuFrequencyMhz(240);  // Set CPU frequency to 240 MHz
@@ -665,7 +666,15 @@ void setup() {
     esp_task_wdt_add(NULL);
     Serial.printf("CPU Freq: %d MHz\n", getCpuFrequencyMhz());
     init_AD();
-
+    Set_IODirectionAndValue(IODirection_br_bl, IOValues_br_bl);
+    mycalibrator.begin(br_analog, bl_analog);
+    // Try to load existing calibration
+    if (!mycalibrator.load_calibration_from_nvs()) {
+        // No existing calibration, run interactive calibration
+        if (mycalibrator.calibrate_interactively_empirical()) {
+            mycalibrator.save_calibration_to_nvs();
+        }
+    }
     testWiresOnByOne();
     SetupNetworkStuff();
 
