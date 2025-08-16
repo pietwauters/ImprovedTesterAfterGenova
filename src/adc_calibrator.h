@@ -3,7 +3,7 @@
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
 
-constexpr int CurrentVersion = 1;
+constexpr int CurrentVersion = 3;
 
 // Empirical resistor calibrator using your proven model:
 // V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
@@ -55,10 +55,18 @@ class EmpiricalResistorCalibrator {
 
     // Helper functions
     float calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction);
+    float voltage_to_resistance(float v_diff, float v_gpio, float r1_r2, float correction);
     bool least_squares_fit(float* R_values, float* V_diff_values, int num_points);
     void wait_for_enter();
     float read_float_from_uart();  // ESP32-safe float input with WDT reset
     char read_char_from_uart();    // ESP32-safe char input with WDT reset
+
+    // Multi-stage calibration helper functions
+    float optimize_slope_weighted(float* R_values, float* V_diff_values, int num_points, float v_gpio_open);
+    float optimize_correction_sweep(float* R_values, float* V_diff_values, int num_points, float v_gpio_open,
+                                    float r1_r2_fixed);
+    void show_calibration_quality(float* R_values, float* V_diff_values, int num_points);
+    void interactive_parameter_tuning(float* R_values, float* V_diff_values, int num_points);
 };
 
 class DifferentialResistorCalibrator {
