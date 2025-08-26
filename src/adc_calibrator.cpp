@@ -744,6 +744,63 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
     }
 }
 
+uint32_t EmpiricalResistorCalibrator::get_adc_threshold_for_resistance_with_leads(float resistance_threshold,
+                                                                                  float lead_resistance) {
+    if (v_gpio <= 0 || r1_r2 <= 0) {
+        return 0;  // Not calibrated
+    }
+
+    // The total resistance the system will see is the target resistance plus lead resistance
+    float total_resistance = resistance_threshold + lead_resistance;
+
+    if (total_resistance <= 0) {
+        return 0;  // Invalid input
+    }
+
+    // Calculate the expected differential voltage using the empirical model
+    // V_diff = V_gpio * R_total / (R_total + R1_R2 + Correction/R_total)
+    float expected_v_diff = calculate_model_voltage(total_resistance, v_gpio, r1_r2, correction);
+
+    if (expected_v_diff <= 0) {
+        return 0;  // Invalid calculation
+    }
+
+    // Convert expected voltage to ADC raw value
+    // The ADC measures differential voltage: V_top - V_bottom = expected_v_diff
+    // We need to find the raw ADC value that corresponds to this differential voltage
+
+    // Since we're measuring differentially, we need to consider that:
+    // - V_top corresponds to the higher voltage (closer to V_gpio)
+    // - V_bottom corresponds to the lower voltage
+    // - The differential voltage is what we calculated
+
+    // For the empirical model, V_bottom should be close to 0V (ground reference)
+    // and V_top should be expected_v_diff above that
+
+    // Convert voltage to millivolts for esp_adc_cal functions
+    uint32_t expected_mv = (uint32_t)(expected_v_diff * 1000.0f);
+
+    // Convert millivolts back to raw ADC value using the inverse of the calibration
+    // This is an approximation - for exact conversion you'd need the inverse function
+    // But for threshold purposes, this linear approximation should work well
+
+    // The ESP32 ADC is typically 12-bit (0-4095) with Vref around 1100mV
+    // But we use the calibrated characteristics for better accuracy
+    uint32_t raw_threshold = 0;
+
+    // Simple linear interpolation approach:
+    // Find raw value that gives approximately expected_mv when calibrated
+    for (uint32_t raw = 0; raw < 4096; raw += 8) {  // Step by 8 for efficiency
+        uint32_t calibrated_mv = esp_adc_cal_raw_to_voltage(raw, &adc_chars);
+        if (calibrated_mv >= expected_mv) {
+            raw_threshold = raw;
+            break;
+        }
+    }
+
+    return raw_threshold;
+}
+
 float EmpiricalResistorCalibrator::calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction) {
     if (R_known <= 0)
         return 0.0f;

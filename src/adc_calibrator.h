@@ -18,6 +18,9 @@ class EmpiricalResistorCalibrator {
     // Get resistance from differential measurement using empirical model
     float get_resistance_empirical(float v_diff_measured);
 
+    // Get ADC raw threshold for a resistance threshold, compensating for test lead resistance
+    uint32_t get_adc_threshold_for_resistance_with_leads(float resistance_threshold, float lead_resistance = 0.0f);
+
     // Save/load calibration
     bool save_calibration_to_nvs(const char* nvs_namespace = "emp_cal");
     bool load_calibration_from_nvs(const char* nvs_namespace = "emp_cal");

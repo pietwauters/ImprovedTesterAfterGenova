@@ -313,6 +313,16 @@ void WS2812B_LedMatrix::AnimateBrCrConnection() {
     ClearAll();
 }
 
+uint8_t Letter_P[] = {2, 7, 12, 17, 22, 14, 13, 11, 10};
+// uint8_t Letter_P[] = {7, 12, 17, 13, 11};
+
+void WS2812B_LedMatrix::Draw_P(uint32_t theColor) {
+    for (int i = 0; i < 9; i++) {
+        m_pixels->setPixelColor(m_transformFunc(Letter_P[i]), theColor);
+    }
+    m_pixels->show();
+}
+
 uint8_t DiamondShape[] = {2, 8, 7, 6, 10, 11, 12, 13, 14, 18, 17, 16, 22};
 void WS2812B_LedMatrix::DrawDiamond(uint32_t theColor) {
     for (int i = 0; i < 13; i++) {

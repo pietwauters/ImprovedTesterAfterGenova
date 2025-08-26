@@ -74,6 +74,7 @@ class WS2812B_LedMatrix {
     void DrawDiamond(uint32_t theColor);
     void Draw_E(uint32_t theColor);
     void Draw_F(uint32_t theColor);
+    void Draw_P(uint32_t theColor);
     void SequenceTest();
     void ConfigureBlinking(int PixelNr, uint32_t theColor, int OnTime = 100, int OffTime = 100, int Repeat = 0);
     void Blink();
