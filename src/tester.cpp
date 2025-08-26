@@ -225,56 +225,37 @@ bool Tester::delayAndTestWirePluggedInEpee(long delay) {
     return false;
 }
 
-// Move all your existing DoEpeeTest, DoFoilTest, DoLameTest, etc. methods here
-// Just rename them to doEpeeTest, doFoilTest, doLameTest, etc. and make them private
-/*
 void Tester::doEpeeTest() {
-    // Your existing DoEpeeTest code
-    Serial.println("In Epee testing");
-    bool bArCr = false;
-    bool bArBr = false;
-    bool bBrCr = false;
+    int BrCl;
     testWiresOnByOne();
-
-    while(!WirePluggedIn()){
-        bArCr = (testArCr()<myRefs_Ohm[4]);
-        bArBr = (testArBr()<myRefs_Ohm[10]);
-        bBrCr = (testBrCr()<myRefs_Ohm[10]);
-
-        esp_task_wdt_reset();
-        if(bArCr && !bArBr && !bBrCr){
-            LedPanel->SetInner9(LedPanel->m_Green);
-            if(delayAndTestWirePluggedIn(1000))
-                break;
-            esp_task_wdt_reset();
-            if(testArCr()>myRefs_Ohm[4]){
-                LedPanel->ClearAll();
-                LedPanel->myShow();
-            }
-        }
-        if(bArBr){
-            LedPanel->ClearAll();
-            LedPanel->AnimateArBrConnection();
-        }
-        if(bBrCr){
-            LedPanel->ClearAll();
-            LedPanel->AnimateBrCrConnection();
-        }
-        if(!(bArCr || bArBr || bBrCr)){
-            LedPanel->Draw_E(LedPanel->m_Green);
-        }
-        esp_task_wdt_reset();
-        testWiresOnByOne();
-    }
+    ShowingShape = SHAPE_NONE;
     LedPanel->ClearAll();
-    LedPanel->myShow();
-}*/
-
-void Tester::doEpeeTest() {
-    testWiresOnByOne();
-
     while (!WirePluggedInEpee()) {
         esp_task_wdt_reset();
+        LedPanel->myShow();
+        BrCl = testBrCl();
+        if (BrCl < 500) {
+            if (SHAPE_P != ShowingShape) {
+                LedPanel->ClearAll();
+                ShowingShape = SHAPE_P;
+            }
+            if (BrCl < myRefs_Ohm[5]) {
+                LedPanel->Draw_P(LedPanel->m_Green);
+            } else {
+                if (BrCl < myRefs_Ohm[8]) {
+                    LedPanel->Draw_P(LedPanel->m_Yellow);
+                } else {
+                    LedPanel->Draw_P(LedPanel->m_Red);
+                }
+            }
+            LedPanel->myShow();
+            if (delayAndTestWirePluggedInFoil(100)) {
+                Serial.println("Wire plugged in during foil light, breaking out");
+                break;
+            }
+            continue;
+        }
+
         int arCr = testArCr();
         int arCl = testArCl();
         int arBr = testArBr();
@@ -283,6 +264,10 @@ void Tester::doEpeeTest() {
         // Case 1: Both ArBr and BrCr > 1500, ArCl > 600
         if ((arBr > 1500 && brCr > 1500) && arCl > 600) {
             // Show color based on ArCr
+            if (SHAPE_SQUARE != ShowingShape) {
+                LedPanel->ClearAll();
+                ShowingShape = SHAPE_SQUARE;
+            }
             if (arCr < myRefs_Ohm[2]) {
                 LedPanel->SetInner9(LedPanel->m_Green);
             } else if (arCr < myRefs_Ohm[4]) {
@@ -291,6 +276,7 @@ void Tester::doEpeeTest() {
                 LedPanel->SetInner9(LedPanel->m_Red);
             } else {
                 // Above 600, don't show anything
+                ShowingShape = SHAPE_NONE;
                 LedPanel->ClearAll();
                 LedPanel->Draw_E(LedPanel->m_White);
                 LedPanel->myShow();
@@ -351,39 +337,10 @@ void Tester::doEpeeTest() {
     LedPanel->myShow();
 }
 
-// I need to improve the way to leave this mode.
-void Tester::doMassProbeTest() {
-    LedPanel->ClearAll();
-    int BrCl = testBrCl();
-    testWiresOnByOne();
-    while (!WirePluggedInFoil()) {
-        BrCl = testBrCl();
-        while (BrCl < 4095 / 4) {
-            if (BrCl < myRefs_Ohm[5]) {
-                LedPanel->Draw_P(LedPanel->m_Green);
-            } else {
-                if (BrCl < myRefs_Ohm[8]) {
-                    LedPanel->Draw_P(LedPanel->m_Yellow);
-                } else {
-                    LedPanel->Draw_P(LedPanel->m_Red);
-                }
-            }
-            LedPanel->myShow();
-            BrCl = testBrCl();
-            esp_task_wdt_reset();
-            taskYIELD();
-        }
-        vTaskDelay(300 / portTICK_PERIOD_MS);
-        LedPanel->ClearAll();
-        LedPanel->myShow();
-        testWiresOnByOne();
-    }
-}
-
 void Tester::doFoilTest() {
     testWiresOnByOne();
     int BrCl;
-    Shapes_t ShowingShape = SHAPE_NONE;
+
     while (!WirePluggedInFoil()) {
         esp_task_wdt_reset();
         LedPanel->myShow();

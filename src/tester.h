@@ -24,6 +24,7 @@ class Tester {
     int noWireTimeout;
     bool allGood;
     unsigned long lastSpecialTestExit;
+    Shapes_t ShowingShape = SHAPE_NONE;
 
     // Task handle
     TaskHandle_t testerTaskHandle;
@@ -41,7 +42,6 @@ class Tester {
     bool delayAndTestWirePluggedInEpee(long delay);
     void doEpeeTest();
     void doFoilTest();
-    void doMassProbeTest();
     void doLameTest();
     bool animateSingleWire(int wireIndex);
     bool doQuickCheck();
