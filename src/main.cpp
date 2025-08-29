@@ -686,9 +686,16 @@ void setup() {
 
     // Perform initial threshold adjustment after ADC initialization and settings load
     AdjustThreasholdForRealV();
+    for (int i = 0; i < 11; i++) {
+        myRefs_Ohm[i] = mycalibrator.get_adc_threshold_for_resistance_with_leads(1.0 * i, 0.0);
+        // printf("myRefs_Ohm[%d] = %d     ;    StoredRefs_ohm[%d] = %d\n", i, myRefs_Ohm[i], i, StoredRefs_ohm[i]);
+        // fflush(stdout);                 // Force flush
+        // vTaskDelay(pdMS_TO_TICKS(10));  // Small delay
+    }
 
     // Set the reference values after loading settings
     tester->setReferenceValues(myRefs_Ohm);  // Pass the int array
+
     // Remove the idle task from the WDT (do this for both cores)
     esp_task_wdt_delete(xTaskGetIdleTaskHandleForCPU(0));
     esp_task_wdt_delete(xTaskGetIdleTaskHandleForCPU(1));

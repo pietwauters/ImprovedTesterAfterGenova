@@ -60,6 +60,7 @@ class EmpiricalResistorCalibrator {
     float calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction);
     float voltage_to_resistance(float v_diff, float v_gpio, float r1_r2, float correction);
     bool least_squares_fit(float* R_values, float* V_diff_values, int num_points);
+    int voltage_to_adc_raw(float voltage);  // Convert voltage to ADC raw value
     void wait_for_enter();
     float read_float_from_uart();  // ESP32-safe float input with WDT reset
     char read_char_from_uart();    // ESP32-safe char input with WDT reset
