@@ -140,6 +140,7 @@ void Tester::handleWireTestingState1() {
         for (int i = 0; i < 5; i += 2) {
             ledPanel->SetLine(i, ledPanel->m_Green);
         }
+        // This is the time to update the threasholds with the lead resistance
         ledPanel->myShow();
         esp_task_wdt_reset();
         vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -148,6 +149,9 @@ void Tester::handleWireTestingState1() {
     }
 }
 
+
+// Wiretesting2 is only looking for breaks. Resistances have been checked in phase 1
+// So I'm using a relatively high and fixed value
 void Tester::handleWireTestingState2() {
     for (int i = 100000; i > 0; i--) {
         esp_task_wdt_reset();

@@ -52,8 +52,8 @@ void WS2812B_LedMatrix::SetBrightness(uint8_t val) {
     m_Red = Adafruit_NeoPixel::Color(255, 0, 0, m_Brightness);
     m_Green = Adafruit_NeoPixel::Color(0, 255, 0, m_Brightness);
     m_White = Adafruit_NeoPixel::Color(200, 200, 200, m_Brightness);
-    m_Orange = Adafruit_NeoPixel::Color(160, 60, 0, m_Brightness);
-    m_Yellow = Adafruit_NeoPixel::Color(204, 148, 0, m_Brightness);
+    m_Orange = Adafruit_NeoPixel::Color(255, 70, 0, m_Brightness);
+    m_Yellow = Adafruit_NeoPixel::Color(255, 251, 0, m_Brightness);
     m_Blue = Adafruit_NeoPixel::Color(0, 0, 255, m_Brightness);
     m_Purple = Adafruit_NeoPixel::Color(105, 0, 200, m_Brightness);
     m_Off = Adafruit_NeoPixel::Color(0, 0, 0, m_Brightness);
@@ -74,7 +74,10 @@ void WS2812B_LedMatrix::SequenceTest() {
     ClearAll();
     m_pixels->show();
     for (int i = 0; i < NUMPIXELS; i++) {
-        m_pixels->setPixelColor(m_transformFunc(i), m_Red);
+        if (i % 2)
+            m_pixels->setPixelColor(m_transformFunc(i), m_Yellow);
+        else
+            m_pixels->setPixelColor(m_transformFunc(i), m_Orange);
         m_pixels->show();
         delay(animationspeed);
     }
@@ -215,7 +218,7 @@ void WS2812B_LedMatrix::AnimateGoodConnection(int k, int level) {
             break;
 
         case 2:
-            currentcolor = m_Red;
+            currentcolor = m_Orange;
             break;
     }
     for (int i = 10 * k + 4; i >= 10 * k; i--) {
