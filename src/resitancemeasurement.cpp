@@ -5,6 +5,7 @@
 #include "esp_task_wdt.h"
 
 // Number of ADC samples to take for each measurement
+constexpr int MAX_NUM_ADC_SAMPLES = 64;
 #define NUM_ADC_SAMPLES 16
 
 // If you have different pins, change below defines
@@ -98,26 +99,12 @@ esp_adc_cal_characteristics_t adc_chars;
 // void calibrateADCOffsets();
 int getCalibratedVoltage(int raw_value, adc1_channel_t channel);
 
-/*
-int getSample(adc1_channel_t pin){
-  int max = 0;
-  int sample;
-  for(int i = 0; i< 7; i++){
-      //sample = analogReadMilliVolts(pin);
-      sample = adc1_get_raw(pin);
-      if(sample > max)
-        max =sample;
-  }
-  return esp_adc_cal_raw_to_voltage(max, &adc_chars);
-}
-*/
+int samples1[MAX_NUM_ADC_SAMPLES];
+int samples2[MAX_NUM_ADC_SAMPLES];
 
-int getDifferentialSample(adc1_channel_t pin1, adc1_channel_t pin2) {
-    int samples1[NUM_ADC_SAMPLES];
-    int samples2[NUM_ADC_SAMPLES];
-
+int getDifferentialSample(adc1_channel_t pin1, adc1_channel_t pin2, int nr_samples = NUM_ADC_SAMPLES) {
     // Collect NUM_ADC_SAMPLES samples from each pin
-    for (int i = 0; i < NUM_ADC_SAMPLES; i++) {
+    for (int i = 0; i < nr_samples; i++) {
         esp_task_wdt_reset();
         samples1[i] = adc1_get_raw(pin1);
         esp_task_wdt_reset();
@@ -125,7 +112,7 @@ int getDifferentialSample(adc1_channel_t pin1, adc1_channel_t pin2) {
     }
 
     // Simple insertion sort for NUM_ADC_SAMPLES elements (very fast)
-    for (int i = 1; i < NUM_ADC_SAMPLES; i++) {
+    for (int i = 1; i < nr_samples; i++) {
         int key1 = samples1[i];
         int key2 = samples2[i];
         int j = i - 1;
@@ -138,19 +125,28 @@ int getDifferentialSample(adc1_channel_t pin1, adc1_channel_t pin2) {
         samples2[j + 1] = key2;
     }
 
-    // Use proper median values (for even number of samples, average the two middle values)
-    int median1, median2;
-    if (NUM_ADC_SAMPLES % 2 == 0) {
-        // Even number: average the two middle elements
-        median1 = (samples1[NUM_ADC_SAMPLES / 2 - 1] + samples1[NUM_ADC_SAMPLES / 2]) / 2;
-        median2 = (samples2[NUM_ADC_SAMPLES / 2 - 1] + samples2[NUM_ADC_SAMPLES / 2]) / 2;
-    } else {
-        // Odd number: take the middle element
-        median1 = samples1[NUM_ADC_SAMPLES / 2];
-        median2 = samples2[NUM_ADC_SAMPLES / 2];
+    // Use trimmed mean (skip top and bottom 10% of samples)
+    int trim_count = nr_samples / 10;  // Remove 10% from each end (20% total)
+    if (trim_count < 1)
+        trim_count = 1;  // Always remove at least 1 sample from each end if we have enough samples
+    if (nr_samples <= 4)
+        trim_count = 0;  // Don't trim if we have too few samples
+
+    int start_idx = trim_count;
+    int end_idx = nr_samples - trim_count;
+    int valid_samples = end_idx - start_idx;
+
+    // Calculate trimmed mean for both sample arrays
+    long sum1 = 0, sum2 = 0;
+    for (int i = start_idx; i < end_idx; i++) {
+        sum1 += samples1[i];
+        sum2 += samples2[i];
     }
 
-    int delta = (getCalibratedVoltage(median1, pin1) - getCalibratedVoltage(median2, pin2));
+    int trimmed_mean1 = sum1 / valid_samples;
+    int trimmed_mean2 = sum2 / valid_samples;
+
+    int delta = (getCalibratedVoltage(trimmed_mean1, pin1) - getCalibratedVoltage(trimmed_mean2, pin2));
     return delta;
 }
 
@@ -279,9 +275,8 @@ bool testStraightOnly(int threashold) {
     for (int Nr = 0; Nr < 3; Nr++) {
         {
             Set_IODirectionAndValue(testsettings[Nr][Nr][0], testsettings[Nr][Nr][1]);
-
-            // measurements[Nr][Nr] = getSample(analogtestsettings[Nr]);
-            measurements[Nr][Nr] = getDifferentialSample(analogtestsettings_right[Nr], analogtestsettings[Nr]);
+            measurements[Nr][Nr] =
+                getDifferentialSample(analogtestsettings_right[Nr], analogtestsettings[Nr], MAX_NUM_ADC_SAMPLES);
             if (measurements[Nr][Nr] > threashold)
                 bOK = false;
         }

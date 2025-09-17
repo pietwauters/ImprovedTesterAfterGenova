@@ -15,10 +15,16 @@
 #include "SettingsManager.h"
 #include "WS2812BLedMatrix.h"
 #include "WebTerminal.h"
+#include "WiFiPowerManager.h"
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
+// Only include Bluetooth header if it's enabled in config
+#ifdef CONFIG_BT_ENABLED
+#include "esp_bt.h"
+#endif
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/task.h"  // Required for vTaskList()
 #include "resitancemeasurement.h"
 #include "terminal.html.h"
@@ -93,6 +99,8 @@ void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
 
     if (args[0] == "on") {
         DoCalibration = true;
+        // Keep WiFi on during calibration
+        wifiPowerManager.keepWiFiOn("calibration");
 
         // Set which channel to display
         if (args.size() > 1) {
@@ -593,7 +601,18 @@ void LoadSettings() {
 void SetupNetworkStuff() {
     WiFi.mode(WIFI_AP);
     WiFi.softAP("Tester", "01041967");
+
+    // Setup ElegantOTA with callbacks for WiFi power management
     ElegantOTA.begin(&server);
+    ElegantOTA.onStart([]() { wifiPowerManager.onOTAStart(); });
+    ElegantOTA.onEnd([](bool success) {
+        if (success) {
+            wifiPowerManager.onOTAEnd();
+        } else {
+            wifiPowerManager.onOTAError();
+        }
+    });
+
     Serial.println(WiFi.softAPIP());
     terminal.begin();
 
@@ -605,6 +624,9 @@ void SetupNetworkStuff() {
 
     settings.addWebEndpoints(server);
     settings.setPostSaveCallback(synchronizeThresholdValues);
+
+    // Initialize WiFi Power Manager after WiFi setup
+    wifiPowerManager.begin();
 }
 
 void setupSerialTerminal() {
@@ -641,7 +663,20 @@ void handleHelpCommand(ITerminal* term, const std::vector<String>& args) {
 }
 
 #include "tester.h"
+void disableRadioForTesting() {
+    Serial.println("=== TEMPORARILY DISABLING RADIO FOR TESTING ===");
 
+    // Disable WiFi if it was initialized
+    WiFi.mode(WIFI_OFF);
+    WiFi.disconnect(true);
+
+// Disable Bluetooth (if available)
+#if defined(CONFIG_BT_ENABLED)
+    btStop();
+#endif
+
+    Serial.println("Radio disabled - WiFi and Bluetooth are off");
+}
 // Global tester instance
 Tester* tester = nullptr;
 EmpiricalResistorCalibrator mycalibrator;
@@ -656,7 +691,7 @@ void setup() {
     LedPanel->begin();
     LedPanel->ClearAll();
     LedPanel->SequenceTest();
-    LedPanel->ConfigureBlinking(12, LedPanel->m_Orange, 120, 1000, 0);
+    LedPanel->ConfigureBlinking(12, LedPanel->m_Orange, 100, 2000, 0);
     LedPanel->SetBrightness((uint8_t)Brightness);  // Set the brightness level for the LED panel
 
     // Setup serial terminal first, before other initialization
@@ -677,7 +712,8 @@ void setup() {
     }
     testWiresOnByOne();
     SetupNetworkStuff();
-
+    //  Explicitly disable Wifi and Bluetooth
+    // disableRadioForTesting();
     // Create the tester instance
     tester = new Tester(LedPanel);
 
@@ -707,6 +743,11 @@ void loop() {
     // Always run serial terminal
     serialTerminal.loop();
     esp_task_wdt_reset();
+
+    // Run WiFi power management
+    wifiPowerManager.loop();
+    esp_task_wdt_reset();
+
     ElegantOTA.loop();
     esp_task_wdt_reset();
     terminal.loop();
@@ -714,6 +755,18 @@ void loop() {
 }
 
 extern "C" void app_main() {
+    // esp_sleep_enable_timer_wakeup(1500000);  // 1.5 seconds in microseconds to
+    // esp_light_sleep_start();                 // or esp_deep_sleep_start() if you want a full reset
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+
+    if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        // Fresh power-on or reset
+        // Configure wakeup source: 2 seconds timer
+        esp_sleep_enable_timer_wakeup(500000);  // microseconds
+        esp_deep_sleep_start();
+        // never returns
+    }
+
     // Call Arduino setup and loop
     initArduino();  // Initialize Arduino if needed
     setup();

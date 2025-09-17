@@ -24,6 +24,14 @@ Tester::~Tester() {
 }
 
 void Tester::begin() {
+    mycalibrator.begin(br_analog, bl_analog);
+    // Try to load existing calibration
+    if (!mycalibrator.load_calibration_from_nvs()) {
+        // No existing calibration, run interactive calibration
+        if (mycalibrator.calibrate_interactively_empirical()) {
+            mycalibrator.save_calibration_to_nvs();
+        }
+    }
     // Create the tester task
     xTaskCreatePinnedToCore(testerTaskWrapper, "TesterTask",
                             8192,  // Stack size
@@ -141,6 +149,14 @@ void Tester::handleWireTestingState1() {
             ledPanel->SetLine(i, ledPanel->m_Green);
         }
         // This is the time to update the threasholds with the lead resistance
+        if (testStraightOnly(myRefs_Ohm[1])) {
+            for (int i = 0; i < 3; i++) {
+                leadresistances[i] = mycalibrator.get_resistance_empirical(measurements[i][i] / 1000.0);
+                printf("Resistance lead[%d] = %.2f Ohm\n", i, leadresistances[i]);
+                fflush(stdout);                 // Force flush
+                vTaskDelay(pdMS_TO_TICKS(10));  // Small delay
+            }
+        }
         ledPanel->myShow();
         esp_task_wdt_reset();
         vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -148,7 +164,6 @@ void Tester::handleWireTestingState1() {
         currentState = WireTesting_2;
     }
 }
-
 
 // Wiretesting2 is only looking for breaks. Resistances have been checked in phase 1
 // So I'm using a relatively high and fixed value
@@ -168,7 +183,7 @@ void Tester::handleWireTestingState2() {
     }
 
     esp_task_wdt_reset();
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
     esp_task_wdt_reset();
 
     timeToSwitch = 3;
@@ -231,14 +246,15 @@ bool Tester::delayAndTestWirePluggedInEpee(long delay) {
 
 void Tester::doEpeeTest() {
     int BrCl;
+    uint32_t tempColor;
     testWiresOnByOne();
     ShowingShape = SHAPE_NONE;
     LedPanel->ClearAll();
     while (!WirePluggedInEpee()) {
         esp_task_wdt_reset();
-        LedPanel->myShow();
         BrCl = testBrCl();
         if (BrCl < 500) {
+            // We're in Probe mode
             if (SHAPE_P != ShowingShape) {
                 LedPanel->ClearAll();
                 ShowingShape = SHAPE_P;
@@ -254,7 +270,6 @@ void Tester::doEpeeTest() {
             }
             LedPanel->myShow();
             if (delayAndTestWirePluggedInFoil(100)) {
-                Serial.println("Wire plugged in during foil light, breaking out");
                 break;
             }
             continue;
@@ -266,27 +281,33 @@ void Tester::doEpeeTest() {
         int brCr = testBrCr();
 
         // Case 1: Both ArBr and BrCr > 1500, ArCl > 600
+        // No shorts -> Show E, ArCl > 600 means, no contact between tip and probe so measuring return wire
         if ((arBr > 1500 && brCr > 1500) && arCl > 600) {
             // Show color based on ArCr
+            if (arCr < myRefs_Ohm[2]) {
+                tempColor = LedPanel->m_Green;
+                // LedPanel->SetInner9(LedPanel->m_Green);
+            } else if (arCr < myRefs_Ohm[4]) {
+                // LedPanel->SetInner9(LedPanel->m_Yellow);
+                tempColor = LedPanel->m_Yellow;
+            } else if (arCr < 600) {
+                // LedPanel->SetInner9(LedPanel->m_Orange);
+                tempColor = LedPanel->m_Orange;
+            } else {
+                // Above 600, don't show anything
+                if (SHAPE_E != ShowingShape) {
+                    LedPanel->ClearAll();
+                    ShowingShape = SHAPE_E;
+                    LedPanel->Draw_E(LedPanel->m_White);
+                }
+                testWiresOnByOne();
+                continue;
+            }
             if (SHAPE_SQUARE != ShowingShape) {
                 LedPanel->ClearAll();
                 ShowingShape = SHAPE_SQUARE;
             }
-            if (arCr < myRefs_Ohm[2]) {
-                LedPanel->SetInner9(LedPanel->m_Green);
-            } else if (arCr < myRefs_Ohm[4]) {
-                LedPanel->SetInner9(LedPanel->m_Yellow);
-            } else if (arCr < 600) {
-                LedPanel->SetInner9(LedPanel->m_Red);
-            } else {
-                // Above 600, don't show anything
-                ShowingShape = SHAPE_NONE;
-                LedPanel->ClearAll();
-                LedPanel->Draw_E(LedPanel->m_White);
-                LedPanel->myShow();
-                testWiresOnByOne();
-                continue;
-            }
+            LedPanel->SetInner9(tempColor);
             LedPanel->myShow();
             if (delayAndTestWirePluggedInEpee(1000)) {
                 break;
@@ -295,21 +316,29 @@ void Tester::doEpeeTest() {
             LedPanel->myShow();
         }
         // Case 2: Both ArBr and BrCr > 1500, ArCl < 600
+        // No shorts -> Show E, ArCl < 600 means, contact between tip and probe so measuring single wire
         else if ((arBr > 1500 && brCr > 1500) && arCl < 600) {
             // Use thresholds divided by 2
-            if (arCr < myRefs_Ohm[1]) {
-                LedPanel->SetInner9(LedPanel->m_Green);
-            } else if (arCr < myRefs_Ohm[2]) {
-                LedPanel->SetInner9(LedPanel->m_Yellow);
-            } else if (arCr < 300) {
-                LedPanel->SetInner9(LedPanel->m_Red);
+            if (arCl < myRefs_Ohm[1]) {
+                tempColor = LedPanel->m_Green;
+            } else if (arCl < myRefs_Ohm[2]) {
+                tempColor = LedPanel->m_Yellow;
+            } else if (arCl < myRefs_Ohm[10]) {
+                tempColor = LedPanel->m_Orange;
             } else {
-                LedPanel->ClearAll();
-                LedPanel->Draw_E(LedPanel->m_White);
-                LedPanel->myShow();
+                if (SHAPE_E != ShowingShape) {
+                    LedPanel->ClearAll();
+                    ShowingShape = SHAPE_E;
+                    LedPanel->Draw_E(LedPanel->m_White);
+                }
                 testWiresOnByOne();
                 continue;
             }
+            if (SHAPE_SQUARE != ShowingShape) {
+                LedPanel->ClearAll();
+                ShowingShape = SHAPE_SQUARE;
+            }
+            LedPanel->SetInner9(tempColor);
             LedPanel->myShow();
             if (delayAndTestWirePluggedInEpee(1000)) {
                 break;
@@ -329,9 +358,11 @@ void Tester::doEpeeTest() {
         }
         // All other cases: draw white E
         else {
-            LedPanel->ClearAll();
-            LedPanel->Draw_E(LedPanel->m_White);
-            LedPanel->myShow();
+            if (SHAPE_E != ShowingShape) {
+                LedPanel->ClearAll();
+                ShowingShape = SHAPE_E;
+                LedPanel->Draw_E(LedPanel->m_White);
+            }
         }
 
         esp_task_wdt_reset();

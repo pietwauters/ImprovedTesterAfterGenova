@@ -16,7 +16,6 @@ extern const int Reference_10_Ohm[3];
 
 // Function prototypes
 void Set_IODirectionAndValue(uint8_t setting, uint8_t values);
-int getSample(adc1_channel_t pin);
 void testWiresOnByOne();
 bool WirePluggedIn(int threashold = 160);
 bool WirePluggedInFoil(int threashold = 160);

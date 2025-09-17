@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "WS2812BLedMatrix.h"
+#include "adc_calibrator.h"
 #include "esp_task_wdt.h"
 #include "resitancemeasurement.h"
 
@@ -11,7 +12,7 @@ typedef enum { Waiting, EpeeTesting, FoilTesting, LameTesting, WireTesting_1, Wi
 typedef enum { SHAPE_F, SHAPE_E, SHAPE_S, SHAPE_P, SHAPE_DIAMOND, SHAPE_SQUARE, SHAPE_NONE } Shapes_t;
 
 // Timeout constants
-constexpr int WIRE_TEST_1_TIMEOUT = 50;
+constexpr int WIRE_TEST_1_TIMEOUT = 3;
 constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT = 2;
 constexpr int FOIL_TEST_TIMEOUT = 1000;
 constexpr int WIRE_TEST_DELAY = 2000;  // 2 seconds delay after special test exit
@@ -34,8 +35,12 @@ class Tester {
 
     // Add reference values as class members (correct type: int)
     int* myRefs_Ohm;  // Pointer to reference values
+    
+    EmpiricalResistorCalibrator mycalibrator;
+    float leadresistances[3] = {0.0, 0.0, 0.0};
 
     // Private methods
+    
     void doCommonReturnFromSpecialMode();
     bool delayAndTestWirePluggedIn(long delay);
     bool delayAndTestWirePluggedInFoil(long delay);
