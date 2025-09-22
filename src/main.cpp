@@ -762,7 +762,7 @@ extern "C" void app_main() {
     if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) {
         // Fresh power-on or reset
         // Configure wakeup source: 2 seconds timer
-        esp_sleep_enable_timer_wakeup(500000);  // microseconds
+        esp_sleep_enable_timer_wakeup(200000);  // microseconds
         esp_deep_sleep_start();
         // never returns
     }

@@ -26,6 +26,7 @@ int testArCr();
 int testArCl();
 int testBrCr();
 int testBrCl();
+int testCrCl();
 bool IsBroken(int Nr, int threashold = 160);
 bool IsSwappedWith(int i, int j, int threashold = 160);
 void init_AD();

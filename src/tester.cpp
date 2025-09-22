@@ -110,6 +110,10 @@ void Tester::handleWaitingState() {
         doLameTest();
         doCommonReturnFromSpecialMode();
         lastSpecialTestExit = millis();
+    } else if ((testCrCl() < 160) && (measurements[1][1] > 160) && (measurements[2][2] > 160)) {
+        doLameTest_Top();
+        doCommonReturnFromSpecialMode();
+        lastSpecialTestExit = millis();
     }
 
     esp_task_wdt_reset();
@@ -391,7 +395,7 @@ void Tester::doFoilTest() {
                 if (BrCl < myRefs_Ohm[8]) {
                     LedPanel->Draw_P(LedPanel->m_Yellow);
                 } else {
-                    LedPanel->Draw_P(LedPanel->m_Red);
+                    LedPanel->Draw_P(LedPanel->m_Orange);
                 }
             }
             LedPanel->myShow();
@@ -416,7 +420,7 @@ void Tester::doFoilTest() {
             testWiresOnByOne();
             continue;
         } else if (arBr < 2000) {
-            LedPanel->Draw_F(LedPanel->m_Red);
+            LedPanel->Draw_F(LedPanel->m_Orange);
             testWiresOnByOne();
             continue;
         } else {
@@ -447,7 +451,7 @@ void Tester::doFoilTest() {
             } else if (testArCl() < myRefs_Ohm[2]) {
                 LedPanel->SetInner9(LedPanel->m_Yellow);
             } else if (testArCl() < 500) {
-                LedPanel->SetInner9(LedPanel->m_Red);
+                LedPanel->SetInner9(LedPanel->m_Orange);
             } else {
                 LedPanel->SetInner9(LedPanel->m_White);
             }
@@ -497,6 +501,40 @@ void Tester::doLameTest() {
         esp_task_wdt_reset();
 
         if (delayAndTestWirePluggedIn(250))
+            break;
+        esp_task_wdt_reset();
+        testWiresOnByOne();
+    }
+    LedPanel->ClearAll();
+    LedPanel->myShow();
+}
+
+void Tester::doLameTest_Top() {
+    // Your existing DoLameTest code
+    bool bShowingRed = false;
+    testWiresOnByOne();
+    while (!WirePluggedInEpee()) {
+        esp_task_wdt_reset();
+        if (testCrCl() < myRefs_Ohm[5]) {
+            LedPanel->DrawDiamond(LedPanel->m_Green);
+            bShowingRed = false;
+            // while((testBrCr()<myRefs_Ohm[5])){esp_task_wdt_reset();};
+            while (debouncedCondition([this]() { return testCrCl() < myRefs_Ohm[5]; }, 10));
+        } else {
+            if (testCrCl() < myRefs_Ohm[10]) {
+                LedPanel->DrawDiamond(LedPanel->m_Yellow);
+                bShowingRed = false;
+                // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
+                while (debouncedCondition([this]() { return testCrCl() < myRefs_Ohm[10]; }, 10));
+            }
+        }
+
+        if (!bShowingRed)
+            LedPanel->DrawDiamond(LedPanel->m_Red);
+        bShowingRed = true;
+        esp_task_wdt_reset();
+
+        if (delayAndTestWirePluggedInEpee(250))
             break;
         esp_task_wdt_reset();
         testWiresOnByOne();

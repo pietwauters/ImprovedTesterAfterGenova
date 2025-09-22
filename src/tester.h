@@ -35,12 +35,12 @@ class Tester {
 
     // Add reference values as class members (correct type: int)
     int* myRefs_Ohm;  // Pointer to reference values
-    
+
     EmpiricalResistorCalibrator mycalibrator;
     float leadresistances[3] = {0.0, 0.0, 0.0};
 
     // Private methods
-    
+
     void doCommonReturnFromSpecialMode();
     bool delayAndTestWirePluggedIn(long delay);
     bool delayAndTestWirePluggedInFoil(long delay);
@@ -48,6 +48,7 @@ class Tester {
     void doEpeeTest();
     void doFoilTest();
     void doLameTest();
+    void doLameTest_Top();
     bool animateSingleWire(int wireIndex);
     bool doQuickCheck();
     void handleWaitingState();

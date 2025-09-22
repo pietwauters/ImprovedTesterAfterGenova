@@ -308,6 +308,11 @@ int testBrCl() {
     return (getDifferentialSample(br_analog, cl_analog));
 }
 
+int testCrCl() {
+    Set_IODirectionAndValue(IODirection_cr_cl, IOValues_cr_cl);
+    return (getDifferentialSample(cr_analog, cl_analog));
+}
+
 // Simply broken: no contact between i-i' and no contact with other wires
 bool IsBroken(int Nr, int threashold) {
     if ((measurements[Nr][Nr] < threashold))
