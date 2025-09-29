@@ -34,6 +34,8 @@ void Tester::begin() {
 
         if (mycalibrator.calibrate_interactively_empirical()) {
             mycalibrator.save_calibration_to_nvs();
+            LedPanel->ClearAll();
+            LedPanel->myShow();
             LedPanel->SetBlinkColor(LedPanel->m_Green);
         } else {
             mycalibrator.DoFactoryReset();

@@ -4,7 +4,7 @@
 #include "esp_adc_cal.h"
 
 constexpr int CurrentVersion = 3;
-constexpr float Default_v_gpio = 3129.0;
+constexpr float Default_v_gpio = 3.1290;
 constexpr float Default_r1_r2 = 110.0;
 constexpr float Default_correction = 2.50;
 
@@ -27,7 +27,7 @@ class EmpiricalResistorCalibrator {
     // Save/load calibration
     bool save_calibration_to_nvs(const char* nvs_namespace = "emp_cal");
     bool load_calibration_from_nvs(const char* nvs_namespace = "emp_cal");
-    void DoFactoryReset(){
+    void DoFactoryReset() {
         v_gpio = Default_v_gpio;          // Effective GPIO voltage
         r1_r2 = Default_r1_r2;            // Combined fixed resistance
         correction = Default_correction;  // Current-dependent correction factor
@@ -70,8 +70,8 @@ class EmpiricalResistorCalibrator {
     bool least_squares_fit(float* R_values, float* V_diff_values, int num_points);
     int voltage_to_adc_raw(float voltage);  // Convert voltage to ADC raw value
     void wait_for_enter();
-    float read_float_from_uart();  // ESP32-safe float input with WDT reset
-    char read_char_from_uart();    // ESP32-safe char input with WDT reset
+    float read_float_from_uart();                  // ESP32-safe float input with WDT reset
+    char read_char_from_uart(long timeout = 999);  // ESP32-safe char input with WDT reset
 
     // Multi-stage calibration helper functions
     float optimize_slope_weighted(float* R_values, float* V_diff_values, int num_points, float v_gpio_open);

@@ -784,8 +784,8 @@ uint32_t EmpiricalResistorCalibrator::get_adc_threshold_for_resistance_with_lead
     float calculated_v_diff = v_top_expected - v_bottom_expected;
 
     // Step 4: Convert each voltage to ADC raw value separately
-    int raw_top = voltage_to_adc_raw(v_top_expected / 1000.0);
-    int raw_bottom = voltage_to_adc_raw(v_bottom_expected / 1000.0);
+    int raw_top = voltage_to_adc_raw(v_top_expected);
+    int raw_bottom = voltage_to_adc_raw(v_bottom_expected);
 
     // Step 5: Return the difference of raw values
     int raw_diff = raw_top - raw_bottom;
@@ -800,7 +800,7 @@ float EmpiricalResistorCalibrator::calculate_model_voltage(float R_known, float 
 }
 
 // Helper function to convert voltage to ADC raw value using binary search
-// input voltage is in volt!!!!!!! not mV.
+
 int EmpiricalResistorCalibrator::voltage_to_adc_raw(float voltage) {
     // Binary search to find ADC value that gives closest voltage
     // Same approach as DifferentialResistorCalibrator
@@ -1092,7 +1092,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
     printf("Press ENTER when ready to measure open circuit voltage: ");
     fflush(stdout);
 
-    if (read_char_from_uart() == 'q') {
+    if (read_char_from_uart(10) == 'q') {
         return false;
     }
 
@@ -1119,6 +1119,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
 
     printf("Now collect calibration data points with known resistors.\n");
     printf("Suggest: 1, 2, 3, 5, 8, 10, 12 ohms for good coverage.\n\n");
+    printf("Know resistor must be connected between top and bottom 20mm sockets (mass)!\n\n");
 
     while (num_points < MAX_CALIBRATION_POINTS) {
         printf("[Point %d] Enter known resistance value (0 to finish, need minimum 4): ", num_points + 1);
@@ -1349,7 +1350,7 @@ float EmpiricalResistorCalibrator::read_float_from_uart() {
     return value;
 }
 
-char EmpiricalResistorCalibrator::read_char_from_uart() {
+char EmpiricalResistorCalibrator::read_char_from_uart(long timeout) {
     // Clear input buffer
     uart_flush_input(UART_NUM_0);
 
@@ -1377,7 +1378,7 @@ char EmpiricalResistorCalibrator::read_char_from_uart() {
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
-        if (millis() > start_time + 10000) {
+        if (millis() > start_time + timeout * 1000) {
             return 'q';
         }
     }
