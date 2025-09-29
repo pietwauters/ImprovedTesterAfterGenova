@@ -34,7 +34,7 @@ class Tester {
     WS2812B_LedMatrix* ledPanel;
 
     // Add reference values as class members (correct type: int)
-    int* myRefs_Ohm;  // Pointer to reference values
+    int myRefs_Ohm[11];  // Pointer to reference values
 
     EmpiricalResistorCalibrator mycalibrator;
     float leadresistances[3] = {0.0, 0.0, 0.0};
@@ -81,10 +81,10 @@ class Tester {
     void taskLoop();
 
     // Add method to set reference values (correct type: int)
-    void setReferenceValues(int* refs);
+    // void setReferenceValues(int* refs);
 
     // Add method to get reference values (for debugging)
-    int* getReferenceValues() const;
+    // int* getReferenceValues() const;
 };
 
 // Global instance declaration

@@ -4,6 +4,9 @@
 #include "esp_adc_cal.h"
 
 constexpr int CurrentVersion = 3;
+constexpr float Default_v_gpio = 3129.0;
+constexpr float Default_r1_r2 = 110.0;
+constexpr float Default_correction = 2.50;
 
 // Empirical resistor calibrator using your proven model:
 // V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
@@ -24,6 +27,11 @@ class EmpiricalResistorCalibrator {
     // Save/load calibration
     bool save_calibration_to_nvs(const char* nvs_namespace = "emp_cal");
     bool load_calibration_from_nvs(const char* nvs_namespace = "emp_cal");
+    void DoFactoryReset(){
+        v_gpio = Default_v_gpio;          // Effective GPIO voltage
+        r1_r2 = Default_r1_r2;            // Combined fixed resistance
+        correction = Default_correction;  // Current-dependent correction factor
+    };
 
     // Measurement functions
     struct EmpiricalReading {
@@ -49,9 +57,9 @@ class EmpiricalResistorCalibrator {
     adc1_channel_t channel_bottom;
 
     // Empirical model parameters: V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
-    float v_gpio = 0.0f;      // Effective GPIO voltage
-    float r1_r2 = 0.0f;       // Combined fixed resistance
-    float correction = 0.0f;  // Current-dependent correction factor
+    float v_gpio = Default_v_gpio;          // Effective GPIO voltage
+    float r1_r2 = Default_r1_r2;            // Combined fixed resistance
+    float correction = Default_correction;  // Current-dependent correction factor
 
     // ADC calibration
     esp_adc_cal_characteristics_t adc_chars;

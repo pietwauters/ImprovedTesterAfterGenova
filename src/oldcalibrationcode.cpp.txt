@@ -1,0 +1,262 @@
+constexpr int NR_SAMPLES_DIVIDER = 10;
+constexpr int NR_SAMPLES = (1L << NR_SAMPLES_DIVIDER);
+
+// Calculate the best representative value for ADC measurements
+long calculateBestADCValue(const std::vector<long>& sortedSamples) {
+    if (sortedSamples.empty()) {
+        return 0;
+    }
+
+    // Create frequency map
+    std::map<long, int> valueCount;
+    for (const auto& val : sortedSamples) {
+        valueCount[val]++;
+    }
+
+    // Method 1: Weighted average of most frequent triplet (best for stable measurements)
+    long bestTripletCenter = sortedSamples[sortedSamples.size() / 2];  // fallback to median
+    int bestTripletSum = 0;
+
+    for (const auto& pair : valueCount) {
+        long centerValue = pair.first;
+        int tripletSum = 0;
+
+        // Sum frequencies of center-1, center, center+1
+        auto it = valueCount.find(centerValue - 1);
+        if (it != valueCount.end()) {
+            tripletSum += it->second;
+        }
+
+        tripletSum += pair.second;  // center value
+        it = valueCount.find(centerValue + 1);
+        if (it != valueCount.end()) {
+            tripletSum += it->second;
+        }
+
+        if (tripletSum > bestTripletSum) {
+            bestTripletSum = tripletSum;
+            bestTripletCenter = centerValue;
+        }
+    }
+
+    // Calculate weighted average of the triplet
+    long weightedSum = 0;
+    int totalWeight = 0;
+
+    for (long val = bestTripletCenter - 1; val <= bestTripletCenter + 1; val++) {
+        auto it = valueCount.find(val);
+        if (it != valueCount.end()) {
+            weightedSum += val * it->second;
+            totalWeight += it->second;
+        }
+    }
+
+    return (totalWeight > 0) ? (weightedSum / totalWeight) : bestTripletCenter;
+}
+
+// Alternative: Trimmed mean (good for general noise reduction)
+long calculateTrimmedMean(const std::vector<long>& sortedSamples, float trimPercent = 0.1f) {
+    if (sortedSamples.empty()) {
+        return 0;
+    }
+
+    int trimCount = (int)(sortedSamples.size() * trimPercent / 2);
+    if (trimCount >= sortedSamples.size() / 2) {
+        trimCount = 0;
+    }
+
+    long sum = 0;
+    int count = 0;
+
+    for (int i = trimCount; i < sortedSamples.size() - trimCount; i++) {
+        sum += sortedSamples[i];
+        count++;
+    }
+
+    return (count > 0) ? (sum / count) : sortedSamples[sortedSamples.size() / 2];
+}
+
+void Calibrate() {
+    long value = 0;
+    long sample;
+    vector<long> SortedSamples[3];
+
+    long max[] = {0, 0, 0};
+    long min[] = {9999, 9999, 9999};
+    long current_time;
+    long duration;
+
+    while (DoCalibration) {
+        value = 0;
+
+        esp_task_wdt_reset();
+        SortedSamples[0].clear();
+        SortedSamples[1].clear();
+        SortedSamples[2].clear();
+        current_time = millis();
+
+        for (int i = 0; i < NR_SAMPLES; i++) {
+            testStraightOnly();
+            esp_task_wdt_reset();
+            for (int j = 0; j < 3; j++) {
+                auto it = std::lower_bound(SortedSamples[j].begin(), SortedSamples[j].end(), measurements[j][j]);
+                SortedSamples[j].insert(it, measurements[j][j]);
+            }
+        }
+
+        duration = (millis() - current_time);
+        currentTerminal->printf("Duration = %d\n", duration);
+
+        // Update min/max for all channels (needed for calculations)
+        for (int i = 0; i < 3; i++) {
+            if (min[i] > SortedSamples[i][0]) {
+                min[i] = (SortedSamples[i])[0];
+            }
+
+            if (max[i] < SortedSamples[i][NR_SAMPLES - 1]) {
+                max[i] = SortedSamples[i][NR_SAMPLES - 1];
+            }
+        }
+
+        // Auto mode: find channel with lowest median value
+        if (CalibrationAutoMode) {
+            int bestChannel = 0;
+            long lowestMedian = SortedSamples[0][NR_SAMPLES / 2];
+
+            for (int ch = 1; ch < 3; ch++) {
+                long median = SortedSamples[ch][NR_SAMPLES / 2];
+                if (median < lowestMedian) {
+                    lowestMedian = median;
+                    bestChannel = ch;
+                }
+            }
+
+            // Update display channel if it changed
+            if (bestChannel != CalibrationDisplayChannel) {
+                CalibrationDisplayChannel = bestChannel;
+                currentTerminal->printf("AUTO: Switched to channel %d (lowest median: %ld)\n",
+                                        CalibrationDisplayChannel, lowestMedian);
+            }
+        }
+
+        // Display results only for the selected channel
+        int i = CalibrationDisplayChannel;
+
+        int percentile_50_index = (int)((long)NR_SAMPLES * 50L) / 100;
+        int percentile_90_index = (int)((long)NR_SAMPLES * 90L) / 100;
+
+        // Find most common value
+        std::map<long, int> valueCount;
+        for (const auto& val : SortedSamples[i]) {
+            valueCount[val]++;
+        }
+
+        long mostCommonValue = SortedSamples[i][0];
+        int maxCount = 0;
+        for (const auto& pair : valueCount) {
+            if (pair.second > maxCount) {
+                maxCount = pair.second;
+                mostCommonValue = pair.first;
+            }
+        }
+
+        // Find most frequent 3 consecutive values
+        long bestTripletCenter = mostCommonValue;
+        int bestTripletSum = 0;
+
+        for (const auto& pair : valueCount) {
+            long centerValue = pair.first;
+            int tripletSum = 0;
+
+            // Sum frequencies of center-1, center, center+1
+            auto it = valueCount.find(centerValue - 1);
+            if (it != valueCount.end()) {
+                tripletSum += it->second;
+            }
+
+            tripletSum += pair.second;  // center value
+
+            it = valueCount.find(centerValue + 1);
+            if (it != valueCount.end()) {
+                tripletSum += it->second;
+            }
+
+            if (tripletSum > bestTripletSum) {
+                bestTripletSum = tripletSum;
+                bestTripletCenter = centerValue;
+            }
+        }
+
+        // Find percentile of best triplet center
+        int tripletPercentile = 0;
+        for (int k = 0; k < SortedSamples[i].size(); k++) {
+            if (SortedSamples[i][k] == bestTripletCenter) {
+                tripletPercentile = (k * 100) / NR_SAMPLES;
+                break;
+            }
+        }
+
+        // Calculate best ADC values using different methods
+        long bestADCValue = calculateBestADCValue(SortedSamples[i]);
+        long trimmedMean = calculateTrimmedMean(SortedSamples[i], 0.1f);  // Trim 10% from each end
+
+        // Show mode in the output
+        String modeStr = CalibrationAutoMode ? " (AUTO)" : "";
+        currentTerminal->printf("Channel %d%s:\n", i, modeStr.c_str());
+        currentTerminal->printf("   Min = %d      Max = %d      P50 = %d      P90 = %d\n", SortedSamples[i][0],
+                                SortedSamples[i][NR_SAMPLES - 1], SortedSamples[i][percentile_50_index],
+                                SortedSamples[i][percentile_90_index]);
+        currentTerminal->printf("   Most common = %d (%dx)      Best triplet = %d (%dx) P%d\n", mostCommonValue,
+                                maxCount, bestTripletCenter, bestTripletSum, tripletPercentile);
+        currentTerminal->printf("   **BEST ADC = %d**      Trimmed mean = %d\n", bestADCValue, trimmedMean);
+    }
+}
+
+
+void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
+    
+    currentTerminal = term;  // Set global pointer
+    if (args.empty()) {
+        term->printf("Calibrate command requires 'on' or 'off' [channel]\n");
+        term->printf("Usage: calibrate on [0-2]  or  calibrate off\n");
+        term->printf("Default: auto mode (tracks lowest value channel)\n");
+        return;
+    }
+
+    if (args[0] == "on") {
+        DoCalibration = true;
+        // Keep WiFi on during calibration
+        wifiPowerManager.keepWiFiOn("calibration");
+
+        // Set which channel to display
+        if (args.size() > 1) {
+            if (args[1] == "auto") {
+                CalibrationAutoMode = true;
+                CalibrationDisplayChannel = 0;
+                term->printf("Calibration started in AUTO mode (lowest value channel)\n");
+            } else {
+                int channel = args[1].toInt();
+                if (channel >= 0 && channel <= 2) {
+                    CalibrationAutoMode = false;
+                    CalibrationDisplayChannel = channel;
+                    term->printf("Calibration started for channel %d\n", CalibrationDisplayChannel);
+                } else {
+                    term->printf("Invalid channel %d. Using AUTO mode.\n", channel);
+                    CalibrationAutoMode = true;
+                    CalibrationDisplayChannel = 0;
+                    term->printf("Calibration started in AUTO mode (lowest value channel)\n");
+                }
+            }
+        } else {
+            CalibrationAutoMode = true;
+            CalibrationDisplayChannel = 0;
+            term->printf("Calibration started in AUTO mode (lowest value channel)\n");
+        }
+
+    } else if (args[0] == "off") {
+        DoCalibration = false;
+
+    } else {
+        term->printf("Unknown argument for Calibrate command\n");
+    }
+}

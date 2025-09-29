@@ -32,7 +32,7 @@ constexpr uint8_t MASK_GREEN = 0x04;
 constexpr uint8_t MASK_BUZZ = 0x02;
 
 constexpr uint8_t BRIGHTNESS_LOW = 15;
-constexpr uint8_t BRIGHTNESS_NORMAL = 40;
+constexpr uint8_t BRIGHTNESS_NORMAL = 25;
 constexpr uint8_t BRIGHTNESS_HIGH = 60;
 constexpr uint8_t BRIGHTNESS_ULTRAHIGH = 100;
 
@@ -75,10 +75,12 @@ class WS2812B_LedMatrix {
     void Draw_E(uint32_t theColor);
     void Draw_F(uint32_t theColor);
     void Draw_P(uint32_t theColor);
+    void Draw_C(uint32_t theColor);
     void SequenceTest();
     void ConfigureBlinking(int PixelNr, uint32_t theColor, int OnTime = 100, int OffTime = 100, int Repeat = 0);
     void Blink();
     void RestartBlink();
+    void SetBlinkColor(uint32_t theColor) { m_BlinkingColor = theColor; };
 
     uint32_t m_Red;
     uint32_t m_Purple;

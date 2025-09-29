@@ -1,5 +1,6 @@
 #include "adc_calibrator.h"
 
+#include <Arduino.h>
 #include <driver/uart.h>
 #include <math.h>
 #include <string.h>
@@ -765,6 +766,7 @@ uint32_t EmpiricalResistorCalibrator::get_adc_threshold_for_resistance_with_lead
     // From empirical model: effective R1 = R2 = (r1_r2 + correction/R_unknown) / 2
     // IMPORTANT: Handle the case where total_resistance is very small to avoid division by zero
     float correction_term = (total_resistance > 0.001f) ? (correction / total_resistance) : 0.0f;
+
     float r1_equivalent = (r1_r2 + correction_term) / 2.0f;
     float r2_equivalent = r1_equivalent;  // R1 ≈ R2
 
@@ -782,8 +784,8 @@ uint32_t EmpiricalResistorCalibrator::get_adc_threshold_for_resistance_with_lead
     float calculated_v_diff = v_top_expected - v_bottom_expected;
 
     // Step 4: Convert each voltage to ADC raw value separately
-    int raw_top = voltage_to_adc_raw(v_top_expected);
-    int raw_bottom = voltage_to_adc_raw(v_bottom_expected);
+    int raw_top = voltage_to_adc_raw(v_top_expected / 1000.0);
+    int raw_bottom = voltage_to_adc_raw(v_bottom_expected / 1000.0);
 
     // Step 5: Return the difference of raw values
     int raw_diff = raw_top - raw_bottom;
@@ -798,6 +800,7 @@ float EmpiricalResistorCalibrator::calculate_model_voltage(float R_known, float 
 }
 
 // Helper function to convert voltage to ADC raw value using binary search
+// input voltage is in volt!!!!!!! not mV.
 int EmpiricalResistorCalibrator::voltage_to_adc_raw(float voltage) {
     // Binary search to find ADC value that gives closest voltage
     // Same approach as DifferentialResistorCalibrator
@@ -1088,7 +1091,10 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
     printf("Disconnect ALL resistors from the circuit.\n");
     printf("Press ENTER when ready to measure open circuit voltage: ");
     fflush(stdout);
-    read_char_from_uart();
+
+    if (read_char_from_uart() == 'q') {
+        return false;
+    }
 
     printf("Measuring open circuit voltage...\n");
     EmpiricalReading open_reading = read_differential_empirical(50);
@@ -1350,7 +1356,7 @@ char EmpiricalResistorCalibrator::read_char_from_uart() {
     // Show cursor prompt
     printf(">> ");
     fflush(stdout);
-
+    long start_time = millis();
     while (true) {
         esp_task_wdt_reset();  // Reset WDT while waiting
 
@@ -1371,6 +1377,9 @@ char EmpiricalResistorCalibrator::read_char_from_uart() {
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
+        if (millis() > start_time + 10000) {
+            return 'q';
+        }
     }
 }
 bool EmpiricalResistorCalibrator::save_calibration_to_nvs(const char* nvs_namespace) {

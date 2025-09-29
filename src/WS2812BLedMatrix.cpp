@@ -326,6 +326,15 @@ void WS2812B_LedMatrix::Draw_P(uint32_t theColor) {
     m_pixels->show();
 }
 
+uint8_t Letter_C[] = {0, 1, 2, 3, 4, 5, 9, 10, 14, 20, 22, 23, 24};
+
+void WS2812B_LedMatrix::Draw_C(uint32_t theColor) {
+    for (int i = 0; i < sizeof(Letter_C); i++) {
+        m_pixels->setPixelColor(m_transformFunc(Letter_C[i]), theColor);
+    }
+    m_pixels->show();
+}
+
 uint8_t DiamondShape[] = {2, 8, 7, 6, 10, 11, 12, 13, 14, 18, 17, 16, 22};
 void WS2812B_LedMatrix::DrawDiamond(uint32_t theColor) {
     for (int i = 0; i < 13; i++) {

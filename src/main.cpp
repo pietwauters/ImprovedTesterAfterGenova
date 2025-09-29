@@ -18,6 +18,7 @@
 #include "WiFiPowerManager.h"
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
+#include "version.h"
 // Only include Bluetooth header if it's enabled in config
 #ifdef CONFIG_BT_ENABLED
 #include "esp_bt.h"
@@ -90,49 +91,50 @@ ITerminal* currentTerminal = nullptr;
 
 void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
     currentTerminal = term;  // Set global pointer
-    if (args.empty()) {
-        term->printf("Calibrate command requires 'on' or 'off' [channel]\n");
-        term->printf("Usage: calibrate on [0-2]  or  calibrate off\n");
-        term->printf("Default: auto mode (tracks lowest value channel)\n");
-        return;
-    }
-
-    if (args[0] == "on") {
-        DoCalibration = true;
-        // Keep WiFi on during calibration
-        wifiPowerManager.keepWiFiOn("calibration");
-
-        // Set which channel to display
-        if (args.size() > 1) {
-            if (args[1] == "auto") {
-                CalibrationAutoMode = true;
-                CalibrationDisplayChannel = 0;
-                term->printf("Calibration started in AUTO mode (lowest value channel)\n");
-            } else {
-                int channel = args[1].toInt();
-                if (channel >= 0 && channel <= 2) {
-                    CalibrationAutoMode = false;
-                    CalibrationDisplayChannel = channel;
-                    term->printf("Calibration started for channel %d\n", CalibrationDisplayChannel);
-                } else {
-                    term->printf("Invalid channel %d. Using AUTO mode.\n", channel);
-                    CalibrationAutoMode = true;
-                    CalibrationDisplayChannel = 0;
-                    term->printf("Calibration started in AUTO mode (lowest value channel)\n");
-                }
-            }
-        } else {
-            CalibrationAutoMode = true;
-            CalibrationDisplayChannel = 0;
-            term->printf("Calibration started in AUTO mode (lowest value channel)\n");
-        }
-
-    } else if (args[0] == "off") {
-        DoCalibration = false;
-
-    } else {
-        term->printf("Unknown argument for Calibrate command\n");
-    }
+                             /*if (args.empty()) {
+                                 term->printf("Calibrate command requires 'on' or 'off' [channel]\n");
+                                 term->printf("Usage: calibrate on [0-2]  or  calibrate off\n");
+                                 term->printf("Default: auto mode (tracks lowest value channel)\n");
+                                 return;
+                             }
+                         
+                             if (args[0] == "on") {
+                                 DoCalibration = true;
+                                 // Keep WiFi on during calibration
+                                 wifiPowerManager.keepWiFiOn("calibration");
+                         
+                                 // Set which channel to display
+                                 if (args.size() > 1) {
+                                     if (args[1] == "auto") {
+                                         CalibrationAutoMode = true;
+                                         CalibrationDisplayChannel = 0;
+                                         term->printf("Calibration started in AUTO mode (lowest value channel)\n");
+                                     } else {
+                                         int channel = args[1].toInt();
+                                         if (channel >= 0 && channel <= 2) {
+                                             CalibrationAutoMode = false;
+                                             CalibrationDisplayChannel = channel;
+                                             term->printf("Calibration started for channel %d\n", CalibrationDisplayChannel);
+                                         } else {
+                                             term->printf("Invalid channel %d. Using AUTO mode.\n", channel);
+                                             CalibrationAutoMode = true;
+                                             CalibrationDisplayChannel = 0;
+                                             term->printf("Calibration started in AUTO mode (lowest value channel)\n");
+                                         }
+                                     }
+                                 } else {
+                                     CalibrationAutoMode = true;
+                                     CalibrationDisplayChannel = 0;
+                                     term->printf("Calibration started in AUTO mode (lowest value channel)\n");
+                                 }
+                         
+                             } else if (args[0] == "off") {
+                                 DoCalibration = false;
+                         
+                             } else {
+                                 term->printf("Unknown argument for Calibrate command\n");
+                             }*/
+    term->printf("This is a place holder to perform calibration\n");
 }
 
 // Function to synchronize myRefs_Ohm with StoredRefs_ohm after settings changes
@@ -179,220 +181,6 @@ void AdjustThreasholdForRealV() {
     } else {
         // If conditions aren't met, try again in 1 second
         TimeToTest = millis() + 1000;
-    }
-}
-
-constexpr int NR_SAMPLES_DIVIDER = 10;
-constexpr int NR_SAMPLES = (1L << NR_SAMPLES_DIVIDER);
-
-// Calculate the best representative value for ADC measurements
-long calculateBestADCValue(const std::vector<long>& sortedSamples) {
-    if (sortedSamples.empty()) {
-        return 0;
-    }
-
-    // Create frequency map
-    std::map<long, int> valueCount;
-    for (const auto& val : sortedSamples) {
-        valueCount[val]++;
-    }
-
-    // Method 1: Weighted average of most frequent triplet (best for stable measurements)
-    long bestTripletCenter = sortedSamples[sortedSamples.size() / 2];  // fallback to median
-    int bestTripletSum = 0;
-
-    for (const auto& pair : valueCount) {
-        long centerValue = pair.first;
-        int tripletSum = 0;
-
-        // Sum frequencies of center-1, center, center+1
-        auto it = valueCount.find(centerValue - 1);
-        if (it != valueCount.end()) {
-            tripletSum += it->second;
-        }
-
-        tripletSum += pair.second;  // center value
-        it = valueCount.find(centerValue + 1);
-        if (it != valueCount.end()) {
-            tripletSum += it->second;
-        }
-
-        if (tripletSum > bestTripletSum) {
-            bestTripletSum = tripletSum;
-            bestTripletCenter = centerValue;
-        }
-    }
-
-    // Calculate weighted average of the triplet
-    long weightedSum = 0;
-    int totalWeight = 0;
-
-    for (long val = bestTripletCenter - 1; val <= bestTripletCenter + 1; val++) {
-        auto it = valueCount.find(val);
-        if (it != valueCount.end()) {
-            weightedSum += val * it->second;
-            totalWeight += it->second;
-        }
-    }
-
-    return (totalWeight > 0) ? (weightedSum / totalWeight) : bestTripletCenter;
-}
-
-// Alternative: Trimmed mean (good for general noise reduction)
-long calculateTrimmedMean(const std::vector<long>& sortedSamples, float trimPercent = 0.1f) {
-    if (sortedSamples.empty()) {
-        return 0;
-    }
-
-    int trimCount = (int)(sortedSamples.size() * trimPercent / 2);
-    if (trimCount >= sortedSamples.size() / 2) {
-        trimCount = 0;
-    }
-
-    long sum = 0;
-    int count = 0;
-
-    for (int i = trimCount; i < sortedSamples.size() - trimCount; i++) {
-        sum += sortedSamples[i];
-        count++;
-    }
-
-    return (count > 0) ? (sum / count) : sortedSamples[sortedSamples.size() / 2];
-}
-
-void Calibrate() {
-    long value = 0;
-    long sample;
-    vector<long> SortedSamples[3];
-
-    long max[] = {0, 0, 0};
-    long min[] = {9999, 9999, 9999};
-    long current_time;
-    long duration;
-
-    while (DoCalibration) {
-        value = 0;
-
-        esp_task_wdt_reset();
-        SortedSamples[0].clear();
-        SortedSamples[1].clear();
-        SortedSamples[2].clear();
-        current_time = millis();
-
-        for (int i = 0; i < NR_SAMPLES; i++) {
-            testStraightOnly();
-            esp_task_wdt_reset();
-            for (int j = 0; j < 3; j++) {
-                auto it = std::lower_bound(SortedSamples[j].begin(), SortedSamples[j].end(), measurements[j][j]);
-                SortedSamples[j].insert(it, measurements[j][j]);
-            }
-        }
-
-        duration = (millis() - current_time);
-        currentTerminal->printf("Duration = %d\n", duration);
-
-        // Update min/max for all channels (needed for calculations)
-        for (int i = 0; i < 3; i++) {
-            if (min[i] > SortedSamples[i][0]) {
-                min[i] = (SortedSamples[i])[0];
-            }
-
-            if (max[i] < SortedSamples[i][NR_SAMPLES - 1]) {
-                max[i] = SortedSamples[i][NR_SAMPLES - 1];
-            }
-        }
-
-        // Auto mode: find channel with lowest median value
-        if (CalibrationAutoMode) {
-            int bestChannel = 0;
-            long lowestMedian = SortedSamples[0][NR_SAMPLES / 2];
-
-            for (int ch = 1; ch < 3; ch++) {
-                long median = SortedSamples[ch][NR_SAMPLES / 2];
-                if (median < lowestMedian) {
-                    lowestMedian = median;
-                    bestChannel = ch;
-                }
-            }
-
-            // Update display channel if it changed
-            if (bestChannel != CalibrationDisplayChannel) {
-                CalibrationDisplayChannel = bestChannel;
-                currentTerminal->printf("AUTO: Switched to channel %d (lowest median: %ld)\n",
-                                        CalibrationDisplayChannel, lowestMedian);
-            }
-        }
-
-        // Display results only for the selected channel
-        int i = CalibrationDisplayChannel;
-
-        int percentile_50_index = (int)((long)NR_SAMPLES * 50L) / 100;
-        int percentile_90_index = (int)((long)NR_SAMPLES * 90L) / 100;
-
-        // Find most common value
-        std::map<long, int> valueCount;
-        for (const auto& val : SortedSamples[i]) {
-            valueCount[val]++;
-        }
-
-        long mostCommonValue = SortedSamples[i][0];
-        int maxCount = 0;
-        for (const auto& pair : valueCount) {
-            if (pair.second > maxCount) {
-                maxCount = pair.second;
-                mostCommonValue = pair.first;
-            }
-        }
-
-        // Find most frequent 3 consecutive values
-        long bestTripletCenter = mostCommonValue;
-        int bestTripletSum = 0;
-
-        for (const auto& pair : valueCount) {
-            long centerValue = pair.first;
-            int tripletSum = 0;
-
-            // Sum frequencies of center-1, center, center+1
-            auto it = valueCount.find(centerValue - 1);
-            if (it != valueCount.end()) {
-                tripletSum += it->second;
-            }
-
-            tripletSum += pair.second;  // center value
-
-            it = valueCount.find(centerValue + 1);
-            if (it != valueCount.end()) {
-                tripletSum += it->second;
-            }
-
-            if (tripletSum > bestTripletSum) {
-                bestTripletSum = tripletSum;
-                bestTripletCenter = centerValue;
-            }
-        }
-
-        // Find percentile of best triplet center
-        int tripletPercentile = 0;
-        for (int k = 0; k < SortedSamples[i].size(); k++) {
-            if (SortedSamples[i][k] == bestTripletCenter) {
-                tripletPercentile = (k * 100) / NR_SAMPLES;
-                break;
-            }
-        }
-
-        // Calculate best ADC values using different methods
-        long bestADCValue = calculateBestADCValue(SortedSamples[i]);
-        long trimmedMean = calculateTrimmedMean(SortedSamples[i], 0.1f);  // Trim 10% from each end
-
-        // Show mode in the output
-        String modeStr = CalibrationAutoMode ? " (AUTO)" : "";
-        currentTerminal->printf("Channel %d%s:\n", i, modeStr.c_str());
-        currentTerminal->printf("   Min = %d      Max = %d      P50 = %d      P90 = %d\n", SortedSamples[i][0],
-                                SortedSamples[i][NR_SAMPLES - 1], SortedSamples[i][percentile_50_index],
-                                SortedSamples[i][percentile_90_index]);
-        currentTerminal->printf("   Most common = %d (%dx)      Best triplet = %d (%dx) P%d\n", mostCommonValue,
-                                maxCount, bestTripletCenter, bestTripletSum, tripletPercentile);
-        currentTerminal->printf("   **BEST ADC = %d**      Trimmed mean = %d\n", bestADCValue, trimmedMean);
     }
 }
 
@@ -596,6 +384,9 @@ void LoadSettings() {
     for (int i = 0; i < 11; i++) {
         myRefs_Ohm[i] = StoredRefs_ohm[i];
     }
+    if (Brightness < 1) {
+        Brightness = BRIGHTNESS_NORMAL;
+    }
 }
 
 void SetupNetworkStuff() {
@@ -654,9 +445,7 @@ void handleHelpCommand(ITerminal* term, const std::vector<String>& args) {
     term->send("Available commands:");
     term->send("  echo <text>          - Echo back the text");
     term->send("  reboot               - Restart the device");
-    term->send("  calibrate on [0-2]   - Start calibration (optional channel)");
-    term->send("  calibrate on auto    - Start auto calibration (tracks lowest channel)");
-    term->send("  calibrate off        - Stop calibration");
+    term->send("  calibrate            - Start calibration");
     term->send("  list                 - Show available settings");
     term->send("  set <name> <value>   - Change a setting");
     term->send("  help                 - Show this help message");
@@ -679,7 +468,7 @@ void disableRadioForTesting() {
 }
 // Global tester instance
 Tester* tester = nullptr;
-EmpiricalResistorCalibrator mycalibrator;
+
 void setup() {
     // put your setup code here, to run once:
     setCpuFrequencyMhz(240);  // Set CPU frequency to 240 MHz
@@ -691,7 +480,7 @@ void setup() {
     LedPanel->begin();
     LedPanel->ClearAll();
     LedPanel->SequenceTest();
-    LedPanel->ConfigureBlinking(12, LedPanel->m_Orange, 100, 2000, 0);
+    LedPanel->ConfigureBlinking(12, LedPanel->m_Red, 100, 2000, 0);
     LedPanel->SetBrightness((uint8_t)Brightness);  // Set the brightness level for the LED panel
 
     // Setup serial terminal first, before other initialization
@@ -700,17 +489,9 @@ void setup() {
     esp_task_wdt_init(20, true);
     esp_task_wdt_add(NULL);
     Serial.printf("CPU Freq: %d MHz\n", getCpuFrequencyMhz());
+    printf("App version: %s\n", APP_VERSION);
     init_AD();
     Set_IODirectionAndValue(IODirection_br_bl, IOValues_br_bl);
-    mycalibrator.begin(br_analog, bl_analog);
-    // Try to load existing calibration
-    if (!mycalibrator.load_calibration_from_nvs()) {
-        // No existing calibration, run interactive calibration
-        if (mycalibrator.calibrate_interactively_empirical()) {
-            mycalibrator.save_calibration_to_nvs();
-        }
-    }
-    testWiresOnByOne();
     SetupNetworkStuff();
     //  Explicitly disable Wifi and Bluetooth
     // disableRadioForTesting();
@@ -719,18 +500,6 @@ void setup() {
 
     // Start the tester task
     tester->begin();
-
-    // Perform initial threshold adjustment after ADC initialization and settings load
-    AdjustThreasholdForRealV();
-    for (int i = 0; i < 11; i++) {
-        myRefs_Ohm[i] = mycalibrator.get_adc_threshold_for_resistance_with_leads(1.0 * i, 0.0);
-        // printf("myRefs_Ohm[%d] = %d     ;    StoredRefs_ohm[%d] = %d\n", i, myRefs_Ohm[i], i, StoredRefs_ohm[i]);
-        // fflush(stdout);                 // Force flush
-        // vTaskDelay(pdMS_TO_TICKS(10));  // Small delay
-    }
-
-    // Set the reference values after loading settings
-    tester->setReferenceValues(myRefs_Ohm);  // Pass the int array
 
     // Remove the idle task from the WDT (do this for both cores)
     esp_task_wdt_delete(xTaskGetIdleTaskHandleForCPU(0));

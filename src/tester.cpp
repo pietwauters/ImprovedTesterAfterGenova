@@ -12,8 +12,8 @@ Tester::Tester(WS2812B_LedMatrix* ledPanelRef)
       noWireTimeout(NO_WIRES_PLUGGED_IN_TIMEOUT),
       allGood(true),
       lastSpecialTestExit(0),
-      testerTaskHandle(nullptr),
-      myRefs_Ohm(nullptr)  // Initialize to nullptr
+      testerTaskHandle(nullptr)
+
 {
     testerInstance = this;
 }
@@ -28,9 +28,23 @@ void Tester::begin() {
     // Try to load existing calibration
     if (!mycalibrator.load_calibration_from_nvs()) {
         // No existing calibration, run interactive calibration
+        LedPanel->Draw_C(LedPanel->m_Red);
+        LedPanel->myShow();
+        mycalibrator.DoFactoryReset();
+
         if (mycalibrator.calibrate_interactively_empirical()) {
             mycalibrator.save_calibration_to_nvs();
+            LedPanel->SetBlinkColor(LedPanel->m_Green);
+        } else {
+            mycalibrator.DoFactoryReset();
         }
+
+    } else {
+        LedPanel->SetBlinkColor(LedPanel->m_Green);
+    }
+    for (int i = 0; i < 11; i++) {
+        myRefs_Ohm[i] = mycalibrator.get_adc_threshold_for_resistance_with_leads(1.0 * i, 0.0);
+        printf("Threshold[%d] = %d\n", i, myRefs_Ohm[i]);
     }
     // Create the tester task
     xTaskCreatePinnedToCore(testerTaskWrapper, "TesterTask",
@@ -59,10 +73,10 @@ void Tester::taskLoop() {
     esp_task_wdt_add(NULL);
 
     while (true) {
-        if (DoCalibration) {
+        /*if (DoCalibration) {
             ledPanel->ClearAll();
             Calibrate();
-        }
+        }*/
 
         esp_task_wdt_reset();
 
@@ -608,9 +622,8 @@ void Tester::startCalibration() { DoCalibration = true; }
 
 void Tester::stopCalibration() { DoCalibration = false; }
 
-void Tester::setReferenceValues(int* refs) { myRefs_Ohm = refs; }
-
-int* Tester::getReferenceValues() const { return myRefs_Ohm; }
+// void Tester::setReferenceValues(int* refs) { myRefs_Ohm = refs; }
+// int* Tester::getReferenceValues() const { return myRefs_Ohm; }
 
 bool Tester::debouncedCondition(std::function<bool()> condition, int debounceMs) {
     unsigned long falseStartTime = 0;
