@@ -42,10 +42,27 @@ using namespace std;
 #include "driver/rtc_io.h"
 #include "esp_log.h"
 #include "soc/io_mux_reg.h"  // For IO_MUX register definitions
+#include "tester.h"
+void disableRadioForTesting() {
+    Serial.println("=== TEMPORARILY DISABLING RADIO FOR TESTING ===");
+
+    // Disable WiFi if it was initialized
+    WiFi.mode(WIFI_OFF);
+    WiFi.disconnect(true);
+
+// Disable Bluetooth (if available)
+#if defined(CONFIG_BT_ENABLED)
+    btStop();
+#endif
+
+    Serial.println("Radio disabled - WiFi and Bluetooth are off");
+}
+// Global tester instance
+Tester* tester = nullptr;
 
 int myRefs_Ohm[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 int StoredRefs_ohm[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-int R0 = 130;
+
 int Vmax = 2992;
 volatile bool DoCalibration = false;
 bool MirrorMode = true;              // Default to no mirror mode
@@ -135,15 +152,17 @@ void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
                                  term->printf("Unknown argument for Calibrate command\n");
                              }*/
     term->printf("This is a place holder to perform calibration\n");
-}
-
-// Function to synchronize myRefs_Ohm with StoredRefs_ohm after settings changes
-void synchronizeThresholdValues() {
-    for (int i = 0; i < 11; i++) {
-        myRefs_Ohm[i] = StoredRefs_ohm[i];
+    if (tester != nullptr) {
+        term->printf("v_gpio = %f\n", tester->get_v_gpio());
+        term->printf("r1r2 = %f\n", tester->get_r1_r2());
+        term->printf("correction = %f\n", tester->get_correction());
     }
 }
 
+// Function to synchronize myRefs_Ohm with StoredRefs_ohm after settings changes
+void synchronizeThresholdValues() {}
+
+// This function should become part of the calibrationmodule
 void AdjustThreasholdForRealV() {
     static bool bInitialAdjustmentDone = false;
     static long TimeToTest = 0;
@@ -192,8 +211,6 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
     term->printf("===================\n");
 
     term->printf("Integer settings:\n");
-    term->printf("  R0                  : %d ohm (Total resistance Ron + 2x47)\n", R0);
-    term->printf("  Vmax                : %d mV (Maximum voltage)\n", Vmax);
     term->printf("  Brightness          : %d (Display brightness 1-255)\n", Brightness);
 
     term->printf("\nBoolean settings:\n");
@@ -203,34 +220,15 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
     term->printf("\nString settings:\n");
     term->printf("  name                : %s (Device Name)\n", deviceName.c_str());
 
-    term->printf("\nArray settings:\n");
-    term->printf("  myRefs_Ohm          : [");
-    for (int i = 0; i < 11; i++) {
-        term->printf("%d", StoredRefs_ohm[i]);
-        if (i < 10) {
-            term->printf(", ");
-        }
-    }
-    term->printf("] (Threshold values 0-10 Ohm)\n");
-
     term->printf("\nNote: Use the web interface to modify these settings\n");
-    term->printf("Current working values:\n");
-    term->printf("  myRefs_Ohm (active) : [");
-    for (int i = 0; i < 11; i++) {
-        term->printf("%d", myRefs_Ohm[i]);
-        if (i < 10) {
-            term->printf(", ");
-        }
-    }
-    term->printf("]\n");
 }
 
 void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
     if (args.size() < 2) {
         term->printf("Usage: set <setting_name> <value>\n");
-        term->printf("Available settings: R0, Vmax, bCalibrate, MirrorMode, Brightness, name, myRefs_Ohm\n");
+        term->printf("Available settings: bCalibrate, MirrorMode, Brightness, name\n");
         term->printf("Example: set name \"MyTester\"\n");
-        term->printf("Example: set myRefs_Ohm 0,1,2,3,4,5,6,7,8,9,12\n");
+        // term->printf("Example: set myRefs_Ohm 0,1,2,3,4,5,6,7,8,9,12\n");
         return;
     }
 
@@ -240,24 +238,7 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
     term->printf("Setting '%s' to '%s'...\n", settingName.c_str(), value.c_str());
 
     // Integer settings
-    if (settingName == "R0") {
-        int newValue = value.toInt();
-        if (newValue <= 0) {
-            term->printf("Error: R0 must be > 0\n");
-            return;
-        }
-        R0 = newValue;
-        term->printf("✓ Set R0 = %d ohm\n", newValue);
-
-    } else if (settingName == "Vmax") {
-        int newValue = value.toInt();
-        if (newValue <= 0) {
-            term->printf("Error: Vmax must be > 0\n");
-            return;
-        }
-        Vmax = newValue;
-        term->printf("✓ Set Vmax = %d mV\n", newValue);
-    } else if (settingName == "Brightness") {
+    if (settingName == "Brightness") {
         int newValue = value.toInt();
         if (newValue < 1 || newValue > 255) {
             term->printf("Error: Brightness must be between 1 and 255\n");
@@ -300,63 +281,9 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
         term->printf("✓ Set name = \"%s\"\n", value.c_str());
 
         // Array settings
-    } else if (settingName == "myRefs_Ohm") {
-        // Parse comma-separated values
-        int newRefs[11];
-        int count = 0;
-        int startPos = 0;
-
-        for (int i = 0; i < 11; i++) {
-            int commaPos = value.indexOf(',', startPos);
-            String numberStr;
-
-            if (commaPos == -1) {
-                // Last number
-                numberStr = value.substring(startPos);
-            } else {
-                numberStr = value.substring(startPos, commaPos);
-                startPos = commaPos + 1;
-            }
-
-            newRefs[i] = numberStr.toInt();
-            count++;
-
-            if (commaPos == -1) {
-                break;  // No more commas
-            }
-        }
-
-        if (count != 11) {
-            term->printf("Error: myRefs_Ohm requires exactly 11 values\n");
-            return;
-        }
-
-        // Validate values are in ascending order
-        for (int i = 1; i < 11; i++) {
-            if (newRefs[i] < newRefs[i - 1]) {
-                term->printf("Error: Values must be in ascending order\n");
-                return;
-            }
-        }
-
-        // Update both stored and working arrays
-        for (int i = 0; i < 11; i++) {
-            StoredRefs_ohm[i] = newRefs[i];
-            myRefs_Ohm[i] = newRefs[i];
-        }
-
-        term->printf("✓ Set myRefs_Ohm = [");
-        for (int i = 0; i < 11; i++) {
-            term->printf("%d", newRefs[i]);
-            if (i < 10) {
-                term->printf(",");
-            }
-        }
-        term->printf("]\n");
-
     } else {
         term->printf("Error: Unknown setting '%s'\n", settingName.c_str());
-        term->printf("Available:  R0, Vmax, bCalibrate, MirrorMode, Brightness, name, myRefs_Ohm\n");
+        term->printf("Available:  R0, Vmax, bCalibrate, MirrorMode, Brightness, name\n");
         return;
     }
 
@@ -370,20 +297,15 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
 void LoadSettings() {
     // Register settings
 
-    settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
-    // settings.addIntArray("myRefs_Ohm", "Threshold values from 0 - 10 Ohm", StoredRefs_ohm, 11);
-    settings.addInt("R0", "R0 (total resistance (Ron + 2 x 47)", &R0);
-    settings.addInt("Vmax", "Vmax in mV", &Vmax);
     settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
+    settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
     settings.addInt("Brightness", "Display brightness 1-255", &Brightness);
     settings.addString("name", "Device Name", &deviceName);
+    // settings.addInt("R1_R2", "R1_R2 (total resistance (Ron + 2 x 47)", &R0);
+    // settings.addInt("Vmax", "Vmax in mV", &Vmax);
     settings.begin("Settings");  // for Preferences namespace
     settings.load();
 
-    // Copy the loaded stored references to working references (AFTER settings.load())
-    for (int i = 0; i < 11; i++) {
-        myRefs_Ohm[i] = StoredRefs_ohm[i];
-    }
     if (Brightness < 1) {
         Brightness = BRIGHTNESS_NORMAL;
     }
@@ -450,24 +372,6 @@ void handleHelpCommand(ITerminal* term, const std::vector<String>& args) {
     term->send("  set <name> <value>   - Change a setting");
     term->send("  help                 - Show this help message");
 }
-
-#include "tester.h"
-void disableRadioForTesting() {
-    Serial.println("=== TEMPORARILY DISABLING RADIO FOR TESTING ===");
-
-    // Disable WiFi if it was initialized
-    WiFi.mode(WIFI_OFF);
-    WiFi.disconnect(true);
-
-// Disable Bluetooth (if available)
-#if defined(CONFIG_BT_ENABLED)
-    btStop();
-#endif
-
-    Serial.println("Radio disabled - WiFi and Bluetooth are off");
-}
-// Global tester instance
-Tester* tester = nullptr;
 
 void setup() {
     // put your setup code here, to run once:

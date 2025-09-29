@@ -164,12 +164,22 @@ void SettingsManager::addWebEndpoints(AsyncWebServer& server) {
           flex-direction: column;
           font-size: 1rem;
         }
+        label.checkbox-label {
+          flex-direction: row;
+          align-items: center;
+          gap: 8px;
+        }
         input[type="text"],
-        input[type="number"],
-        input[type="checkbox"] {
+        input[type="number"] {
           font-size: 1rem;
           padding: 8px;
           width: 100%;
+          box-sizing: border-box;
+        }
+        input[type="checkbox"] {
+          font-size: 1rem;
+          padding: 8px;
+          width: auto;
           box-sizing: border-box;
         }
         input[type="submit"] {
@@ -199,10 +209,10 @@ void SettingsManager::addWebEndpoints(AsyncWebServer& server) {
         for (const auto& s : settings) {
             if (s.type == BOOL) {
                 bool val = *(bool*)s.value;
-                html += "<label>" + s.label + "<input type='checkbox' name='" + s.key + "'";
+                html += "<label class='checkbox-label'><input type='checkbox' name='" + s.key + "'";
                 if (val)
                     html += " checked";
-                html += "></label>\n";
+                html += ">" + s.label + "</label>\n";
             } else if (s.type == INT) {
                 int val = *(int*)s.value;
                 html += "<label>" + s.label + "<input type='number' name='" + s.key + "' value='" + String(val) +

@@ -76,6 +76,9 @@ class Tester {
     // Calibration control
     void startCalibration();
     void stopCalibration();
+    float get_v_gpio() const { return mycalibrator.get_v_gpio(); };
+    float get_r1_r2() const { return mycalibrator.get_r1_r2(); };
+    float get_correction() const { return mycalibrator.get_correction(); };
 
     // Main task loop
     void taskLoop();
