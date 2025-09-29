@@ -187,6 +187,11 @@ void SettingsManager::addWebEndpoints(AsyncWebServer& server) {
     </head>
     <body>
       <h2>ESP32 Settings</h2>
+      )rawliteral";
+
+        html += "<p>Version: " + String(APP_VERSION) + "</p>";
+
+        html += R"rawliteral(
       <form method='POST' action='/settings'>
   )rawliteral";
 

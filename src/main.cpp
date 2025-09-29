@@ -371,7 +371,7 @@ void LoadSettings() {
     // Register settings
 
     settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
-    settings.addIntArray("myRefs_Ohm", "Threshold values from 0 - 10 Ohm", StoredRefs_ohm, 11);
+    // settings.addIntArray("myRefs_Ohm", "Threshold values from 0 - 10 Ohm", StoredRefs_ohm, 11);
     settings.addInt("R0", "R0 (total resistance (Ron + 2 x 47)", &R0);
     settings.addInt("Vmax", "Vmax in mV", &Vmax);
     settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
