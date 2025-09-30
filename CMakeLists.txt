@@ -1,13 +1,9 @@
 cmake_minimum_required(VERSION 3.16.0)
-include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(ImprovedTester)
 
-# Set version header path
-set(VERSION_HEADER_PATH "${CMAKE_BINARY_DIR}/version.h")
+# Generate version header BEFORE project() call to ensure it exists
+set(VERSION_HEADER_PATH "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
-# Create a script to generate version header
-set(VERSION_SCRIPT_PATH "${CMAKE_BINARY_DIR}/generate_version.cmake")
-file(WRITE ${VERSION_SCRIPT_PATH} "
+# Get git version string - execute immediately at configuration time
 execute_process(
     COMMAND git describe --tags --always --dirty
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -18,21 +14,39 @@ execute_process(
 
 # Fallback if git fails
 if(NOT GIT_VERSION)
-    set(GIT_VERSION \"unknown\")
+    set(GIT_VERSION "unknown")
 endif()
 
-# Generate version header
-file(WRITE \"${VERSION_HEADER_PATH}\" \"#pragma once\\n#define APP_VERSION \\\"$\{GIT_VERSION\}\\\"\\n\")
-")
+# Always write version header at configuration time
+file(WRITE ${VERSION_HEADER_PATH} "#pragma once\n#define APP_VERSION \"${GIT_VERSION}\"\n")
 
-# Custom target that always runs to generate version header
-add_custom_target(generate_version ALL
-    COMMAND ${CMAKE_COMMAND} -P ${VERSION_SCRIPT_PATH}
-    BYPRODUCTS ${VERSION_HEADER_PATH}
-    COMMENT "Generating version header"
+# Create a pre-build custom command to update version on every build
+add_custom_command(
+    OUTPUT ${VERSION_HEADER_PATH}
+    COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DHEADER_PATH=${VERSION_HEADER_PATH} -P ${CMAKE_SOURCE_DIR}/update_version.cmake
+    COMMENT "Updating version header"
     VERBATIM
 )
 
-# Make sure main component depends on version generation
-# This will be handled in the main component's CMakeLists.txt
-include_directories(${CMAKE_BINARY_DIR})
+# Create the update script
+file(WRITE "${CMAKE_SOURCE_DIR}/update_version.cmake" "
+execute_process(
+    COMMAND git describe --tags --always --dirty
+    WORKING_DIRECTORY \${SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+
+if(NOT GIT_VERSION)
+    set(GIT_VERSION \"unknown\")
+endif()
+
+file(WRITE \${HEADER_PATH} \"#pragma once\\n#define APP_VERSION \\\"\${GIT_VERSION}\\\"\\n\")
+")
+
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(ImprovedTester)
+
+# Make sure header is in include path
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
