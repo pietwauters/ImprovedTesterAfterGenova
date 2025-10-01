@@ -28,19 +28,22 @@ void Tester::begin() {
     // Try to load existing calibration
     if (!mycalibrator.load_calibration_from_nvs()) {
         // No existing calibration, run interactive calibration
-        LedPanel->Draw_C(LedPanel->m_Red);
-        LedPanel->myShow();
         mycalibrator.DoFactoryReset();
-
-        if (mycalibrator.calibrate_interactively_empirical()) {
-            mycalibrator.save_calibration_to_nvs();
-            LedPanel->ClearAll();
+        LedPanel->SetBlinkColor(LedPanel->m_Red);
+        if (!IgnoreCalibrationWarning) {
+            LedPanel->Draw_C(LedPanel->m_Red);
             LedPanel->myShow();
-            LedPanel->SetBlinkColor(LedPanel->m_Green);
-        } else {
-            mycalibrator.DoFactoryReset();
-        }
 
+            if (mycalibrator.calibrate_interactively_empirical()) {
+                mycalibrator.save_calibration_to_nvs();
+                LedPanel->ClearAll();
+                LedPanel->myShow();
+                LedPanel->SetBlinkColor(LedPanel->m_Green);
+            } else {
+                mycalibrator.DoFactoryReset();
+                LedPanel->SetBlinkColor(LedPanel->m_Red);
+            }
+        }
     } else {
         LedPanel->SetBlinkColor(LedPanel->m_Green);
     }

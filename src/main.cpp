@@ -65,7 +65,8 @@ int StoredRefs_ohm[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
 int Vmax = 2992;
 volatile bool DoCalibration = false;
-bool MirrorMode = true;              // Default to no mirror mode
+bool MirrorMode = true;  // Default to no mirror mode
+bool IgnoreCalibrationWarning = false;
 int CalibrationDisplayChannel = 0;   // Default to channel 0
 bool CalibrationAutoMode = false;    // Auto mode flag
 int Brightness = BRIGHTNESS_NORMAL;  // Default brightness level
@@ -215,6 +216,9 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
 
     term->printf("\nBoolean settings:\n");
     term->printf("  bCalibrate          : %s (Perform Calibration?)\n", CalibrationEnabled ? "true" : "false");
+    term->printf("  IgnoreCalibrationWarning          : %s (Ignore warning that Calibration is needed?)\n",
+                 IgnoreCalibrationWarning ? "true" : "false");
+
     term->printf("  MirrorMode          : %s (Should your LedPanel be mirrored?)\n", MirrorMode ? "true" : "false");
 
     term->printf("\nString settings:\n");
@@ -226,7 +230,7 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
 void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
     if (args.size() < 2) {
         term->printf("Usage: set <setting_name> <value>\n");
-        term->printf("Available settings: bCalibrate, MirrorMode, Brightness, name\n");
+        term->printf("Available settings: bCalibrate, IgnoreCalibrationWarning,MirrorMode, Brightness, name\n");
         term->printf("Example: set name \"MyTester\"\n");
         // term->printf("Example: set myRefs_Ohm 0,1,2,3,4,5,6,7,8,9,12\n");
         return;
@@ -299,6 +303,7 @@ void LoadSettings() {
 
     settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
     settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
+    settings.addBool("IgnoreCalibrationWarning", "Ignore warning to Calibrate?", &IgnoreCalibrationWarning);
     settings.addInt("Brightness", "Display brightness 1-255", &Brightness);
     settings.addString("name", "Device Name", &deviceName);
     // settings.addInt("R1_R2", "R1_R2 (total resistance (Ron + 2 x 47)", &R0);
@@ -401,6 +406,7 @@ void setup() {
     // disableRadioForTesting();
     // Create the tester instance
     tester = new Tester(LedPanel);
+    tester->setIgnoreCalibrationWarning(IgnoreCalibrationWarning);
 
     // Start the tester task
     tester->begin();

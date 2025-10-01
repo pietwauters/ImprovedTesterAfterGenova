@@ -38,7 +38,7 @@ class Tester {
 
     EmpiricalResistorCalibrator mycalibrator;
     float leadresistances[3] = {0.0, 0.0, 0.0};
-
+    bool IgnoreCalibrationWarning = false;
     // Private methods
 
     void doCommonReturnFromSpecialMode();
@@ -69,6 +69,7 @@ class Tester {
     // Public methods
     void begin();
     void stop();
+    void setIgnoreCalibrationWarning(bool value) { IgnoreCalibrationWarning = value; };
     State_t getState() const;
     void setState(State_t newState);
     bool isAllGood() const;
