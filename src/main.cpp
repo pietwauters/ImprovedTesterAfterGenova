@@ -388,9 +388,12 @@ void setup() {
     LedPanel->setMirrorMode(MirrorMode);
     LedPanel->begin();
     LedPanel->ClearAll();
-    LedPanel->SequenceTest();
+
     LedPanel->ConfigureBlinking(12, LedPanel->m_Red, 100, 2000, 0);
     LedPanel->SetBrightness((uint8_t)Brightness);  // Set the brightness level for the LED panel
+    // LedPanel->Draw_R(LedPanel->m_Red);
+    // vTaskDelay(10000 / portTICK_PERIOD_MS);
+    LedPanel->SequenceTest();
 
     // Setup serial terminal first, before other initialization
     setupSerialTerminal();

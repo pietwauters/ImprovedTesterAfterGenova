@@ -51,6 +51,10 @@ void Tester::begin() {
         myRefs_Ohm[i] = mycalibrator.get_adc_threshold_for_resistance_with_leads(1.0 * i, 0.0);
         printf("Threshold[%d] = %d\n", i, myRefs_Ohm[i]);
     }
+    Ohm_20 = mycalibrator.get_adc_threshold_for_resistance_with_leads(20.0, 0.0);
+    Ohm_30 = mycalibrator.get_adc_threshold_for_resistance_with_leads(30.0, 0.0);
+    Ohm_50 = mycalibrator.get_adc_threshold_for_resistance_with_leads(50.0, 0.0);
+    SetWiretestMode(false);
     // Create the tester task
     xTaskCreatePinnedToCore(testerTaskWrapper, "TesterTask",
                             8192,  // Stack size
@@ -133,12 +137,14 @@ void Tester::handleWaitingState() {
         doLameTest_Top();
         doCommonReturnFromSpecialMode();
         lastSpecialTestExit = millis();
+    } else if (testAlBl() < 320) {
+        doReelTest();
     }
 
     esp_task_wdt_reset();
 
     // Check for wire testing mode with delay after special tests
-    if (WirePluggedIn()) {
+    if (WirePluggedIn(ReferenceBroken)) {
         // Check if enough time has passed since last special test exit
         if (lastSpecialTestExit == 0 || (millis() - lastSpecialTestExit) > WIRE_TEST_DELAY) {
             currentState = WireTesting_1;
@@ -157,13 +163,14 @@ void Tester::handleWireTestingState1() {
         timeToSwitch--;
     } else {
         timeToSwitch = WIRE_TEST_1_TIMEOUT;
-        if (!WirePluggedIn()) {
+        if (!WirePluggedIn(ReferenceBroken)) {
             noWireTimeout--;
         } else {
             noWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
         }
         if (!noWireTimeout) {
             currentState = Waiting;
+            SetWiretestMode(false);
         }
     }
 
@@ -193,7 +200,7 @@ void Tester::handleWireTestingState1() {
 void Tester::handleWireTestingState2() {
     for (int i = 100000; i > 0; i--) {
         esp_task_wdt_reset();
-        if (!testStraightOnly(160)) {
+        if (!testStraightOnly(ReferenceBroken)) {
             i = 0;
         }
     }
@@ -213,10 +220,12 @@ void Tester::handleWireTestingState2() {
     ledPanel->ClearAll();
     ledPanel->myShow();
     currentState = Waiting;
+    SetWiretestMode(false);
 }
 
 void Tester::doCommonReturnFromSpecialMode() {
     currentState = Waiting;
+    SetWiretestMode(false);
     esp_task_wdt_reset();
     ledPanel->ClearAll();
     ledPanel->RestartBlink();
@@ -265,6 +274,20 @@ bool Tester::delayAndTestWirePluggedInEpee(long delay) {
         }
     }
     return false;
+}
+
+void Tester::doReelTest() {
+    ShowingShape = SHAPE_R;
+    LedPanel->ClearAll();
+    LedPanel->Draw_R(LedPanel->m_Green);
+    LedPanel->myShow();
+    SetWiretestMode(true);
+    while (!WirePluggedInEpee(ReferenceBroken)) {
+        esp_task_wdt_reset();
+        testWiresOnByOne();
+    }
+    LedPanel->ClearAll();
+    LedPanel->myShow();
 }
 
 void Tester::doEpeeTest() {
@@ -561,38 +584,55 @@ void Tester::doLameTest_Top() {
     LedPanel->ClearAll();
     LedPanel->myShow();
 }
+void Tester::SetWiretestMode(bool Reelmode) {
+    if (Reelmode) {
+        ReferenceBroken = Ohm_50;
+        ReferenceGreen = myRefs_Ohm[10];
+        ReferenceYellow = Ohm_20;
+        ReferenceOrange = Ohm_50;
+        ReferenceShort = 300;
+        ReelMode = true;
+    } else {
+        ReferenceBroken = myRefs_Ohm[10];
+        ReferenceGreen = myRefs_Ohm[1];
+        ReferenceYellow = myRefs_Ohm[3];
+        ReferenceOrange = myRefs_Ohm[10];
+        ReferenceShort = 160;
+        ReelMode = false;
+    }
+}
 
-bool Tester::animateSingleWire(int wireIndex) {
+bool Tester::animateSingleWire(int wireIndex, bool ReelMode) {
     // Your existing AnimateSingleWire code
     bool bOK = false;
-    if (measurements[wireIndex][wireIndex] < myRefs_Ohm[10]) {
+    if (measurements[wireIndex][wireIndex] < ReferenceBroken) {
         if ((measurements[wireIndex][(wireIndex + 1) % 3] > 200) &&
             (measurements[wireIndex][(wireIndex + 2) % 3] > 200)) {
             // OK
             int level = 2;
-            if (measurements[wireIndex][wireIndex] <= myRefs_Ohm[3])
+            if (measurements[wireIndex][wireIndex] <= ReferenceYellow)
                 level = 1;
-            if (measurements[wireIndex][wireIndex] <= myRefs_Ohm[1])
+            if (measurements[wireIndex][wireIndex] <= ReferenceGreen)
                 level = 0;
 
             LedPanel->AnimateGoodConnection(wireIndex, level);
             bOK = true;
         } else {
             // short
-            if (measurements[wireIndex][(wireIndex + 1) % 3] < 160)
+            if (measurements[wireIndex][(wireIndex + 1) % 3] < ReferenceShort)
                 LedPanel->AnimateShort(wireIndex, (wireIndex + 1) % 3);
-            else if (measurements[wireIndex][(wireIndex + 2) % 3] < 160)
+            else if (measurements[wireIndex][(wireIndex + 2) % 3] < ReferenceShort)
                 LedPanel->AnimateShort(wireIndex, (wireIndex + 2) % 3);
         }
     } else {
-        if ((measurements[wireIndex][(wireIndex + 1) % 3] > 160) &&
-            (measurements[wireIndex][(wireIndex + 2) % 3] > 160)) {
+        if ((measurements[wireIndex][(wireIndex + 1) % 3] > ReferenceShort) &&
+            (measurements[wireIndex][(wireIndex + 2) % 3] > ReferenceShort)) {
             // Simply broken
             LedPanel->AnimateBrokenConnection(wireIndex);
         } else {
-            if (measurements[wireIndex][(wireIndex + 1) % 3] < 160)
+            if (measurements[wireIndex][(wireIndex + 1) % 3] < ReferenceShort)
                 LedPanel->AnimateWrongConnection(wireIndex, (wireIndex + 1) % 3);
-            if (measurements[wireIndex][(wireIndex + 2) % 3] < 160)
+            if (measurements[wireIndex][(wireIndex + 2) % 3] < ReferenceShort)
                 LedPanel->AnimateWrongConnection(wireIndex, (wireIndex + 2) % 3);
         }
     }

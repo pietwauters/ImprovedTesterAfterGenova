@@ -8,8 +8,8 @@
 #include "resitancemeasurement.h"
 
 // State enum
-typedef enum { Waiting, EpeeTesting, FoilTesting, LameTesting, WireTesting_1, WireTesting_2 } State_t;
-typedef enum { SHAPE_F, SHAPE_E, SHAPE_S, SHAPE_P, SHAPE_DIAMOND, SHAPE_SQUARE, SHAPE_NONE } Shapes_t;
+typedef enum { Waiting, EpeeTesting, FoilTesting, LameTesting, WireTesting_1, WireTesting_2, ReelTesting } State_t;
+typedef enum { SHAPE_F, SHAPE_E, SHAPE_S, SHAPE_P, SHAPE_DIAMOND, SHAPE_SQUARE, SHAPE_R, SHAPE_NONE } Shapes_t;
 
 // Timeout constants
 constexpr int WIRE_TEST_1_TIMEOUT = 3;
@@ -35,6 +35,15 @@ class Tester {
 
     // Add reference values as class members (correct type: int)
     int myRefs_Ohm[11];  // Pointer to reference values
+    int Ohm_20;
+    int Ohm_30;
+    int Ohm_50;
+    int ReferenceBroken = myRefs_Ohm[10];
+    int ReferenceGreen = myRefs_Ohm[1];
+    int ReferenceYellow = myRefs_Ohm[3];
+    int ReferenceOrange = myRefs_Ohm[10];
+    int ReferenceShort = 160;
+    bool ReelMode = false;
 
     EmpiricalResistorCalibrator mycalibrator;
     float leadresistances[3] = {0.0, 0.0, 0.0};
@@ -49,7 +58,11 @@ class Tester {
     void doFoilTest();
     void doLameTest();
     void doLameTest_Top();
-    bool animateSingleWire(int wireIndex);
+    void doReelTest();
+    bool animateSingleWire(int wireIndex, bool ReelMode = false);
+    void SetWiretestMode(bool Reelmode);
+    bool GetWiretestMode() { return ReelMode; };
+
     bool doQuickCheck();
     void handleWaitingState();
     void handleWireTestingState1();
