@@ -196,6 +196,7 @@ void Tester::handleWireTestingState1() {
         // This is the time to update the threasholds with the lead resistance
 
         if (testStraightOnly(myRefs_Ohm[1])) {
+            AverageLeadResistance = 0.0;
             for (int i = 0; i < 3; i++) {
                 leadresistances[i] = mycalibrator.get_resistance_empirical(measurements[i][i] / 1000.0);
                 AverageLeadResistance += leadresistances[i];
@@ -206,7 +207,7 @@ void Tester::handleWireTestingState1() {
             if (AverageLeadResistance > 0.0) {
                 AverageLeadResistance /= 3.0;
             } else {
-                AverageLeadResistance /= 0.0;
+                AverageLeadResistance = 0.0;
             }
             printf("Average lead resistance = %f & setting blue\n", AverageLeadResistance);
             LedPanel->SetBlinkColor(LedPanel->m_Blue);
