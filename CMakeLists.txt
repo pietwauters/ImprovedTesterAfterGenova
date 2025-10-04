@@ -20,14 +20,6 @@ endif()
 # Always write version header at configuration time
 file(WRITE ${VERSION_HEADER_PATH} "#pragma once\n#define APP_VERSION \"${GIT_VERSION}\"\n")
 
-# Create a pre-build custom command to update version on every build
-add_custom_command(
-    OUTPUT ${VERSION_HEADER_PATH}
-    COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DHEADER_PATH=${VERSION_HEADER_PATH} -P ${CMAKE_SOURCE_DIR}/update_version.cmake
-    COMMENT "Updating version header"
-    VERBATIM
-)
-
 # Create the update script
 file(WRITE "${CMAKE_SOURCE_DIR}/update_version.cmake" "
 execute_process(
@@ -50,3 +42,10 @@ project(ImprovedTester)
 
 # Make sure header is in include path
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
+# Create a target that always runs to update version
+add_custom_target(update_version_always ALL
+    COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DHEADER_PATH=${VERSION_HEADER_PATH} -P ${CMAKE_SOURCE_DIR}/update_version.cmake
+    COMMENT "Updating version header from git"
+    VERBATIM
+)
