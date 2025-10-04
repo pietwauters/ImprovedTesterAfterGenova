@@ -47,6 +47,7 @@ class Tester {
 
     EmpiricalResistorCalibrator mycalibrator;
     float leadresistances[3] = {0.0, 0.0, 0.0};
+    float AverageLeadResistance = 0.0;
     bool IgnoreCalibrationWarning = false;
     // Private methods
 
@@ -93,6 +94,7 @@ class Tester {
     float get_v_gpio() const { return mycalibrator.get_v_gpio(); };
     float get_r1_r2() const { return mycalibrator.get_r1_r2(); };
     float get_correction() const { return mycalibrator.get_correction(); };
+    void UpdateThresholdsWithLeadResistance(float RLead);
 
     // Main task loop
     void taskLoop();

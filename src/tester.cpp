@@ -23,6 +23,17 @@ Tester::~Tester() {
     testerInstance = nullptr;
 }
 
+void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
+    printf("Average lead resistance = %f\n", RLead);
+    for (int i = 0; i < 11; i++) {
+        myRefs_Ohm[i] = mycalibrator.get_adc_threshold_for_resistance_with_leads(1.0 * i, RLead);
+        printf("Threshold[%d] = %d\n", i, myRefs_Ohm[i]);
+    }
+    Ohm_20 = mycalibrator.get_adc_threshold_for_resistance_with_leads(20.0, RLead);
+    Ohm_30 = mycalibrator.get_adc_threshold_for_resistance_with_leads(30.0, RLead);
+    Ohm_50 = mycalibrator.get_adc_threshold_for_resistance_with_leads(50.0, RLead);
+}
+
 void Tester::begin() {
     mycalibrator.begin(br_analog, bl_analog);
     // Try to load existing calibration
@@ -47,14 +58,8 @@ void Tester::begin() {
     } else {
         LedPanel->SetBlinkColor(LedPanel->m_Green);
     }
-    for (int i = 0; i < 11; i++) {
-        myRefs_Ohm[i] = mycalibrator.get_adc_threshold_for_resistance_with_leads(1.0 * i, 0.0);
-        printf("Threshold[%d] = %d\n", i, myRefs_Ohm[i]);
-    }
-    Ohm_20 = mycalibrator.get_adc_threshold_for_resistance_with_leads(20.0, 0.0);
-    Ohm_30 = mycalibrator.get_adc_threshold_for_resistance_with_leads(30.0, 0.0);
-    Ohm_50 = mycalibrator.get_adc_threshold_for_resistance_with_leads(50.0, 0.0);
-    SetWiretestMode(false);
+    UpdateThresholdsWithLeadResistance(0.0);
+    SetWiretestMode(false);  // Normal mode, not Reel testing
     // Create the tester task
     xTaskCreatePinnedToCore(testerTaskWrapper, "TesterTask",
                             8192,  // Stack size
@@ -119,25 +124,34 @@ void Tester::handleWaitingState() {
     ledPanel->Blink();
 
     // Check for special test modes
+
     if (testArCr() < 160) {
         currentState = EpeeTesting;
+        UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
         doEpeeTest();
         doCommonReturnFromSpecialMode();
         lastSpecialTestExit = millis();
     } else if (testArBr() < 160) {
         ledPanel->ClearAll();
+        UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
         doFoilTest();
+
         doCommonReturnFromSpecialMode();
         lastSpecialTestExit = millis();
     } else if (testBrCr() < 160) {
+        UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
         doLameTest();
+
         doCommonReturnFromSpecialMode();
         lastSpecialTestExit = millis();
     } else if ((testCrCl() < 160) && (measurements[1][1] > 160) && (measurements[2][2] > 160)) {
+        UpdateThresholdsWithLeadResistance(AverageLeadResistance);
         doLameTest_Top();
+
         doCommonReturnFromSpecialMode();
         lastSpecialTestExit = millis();
     } else if (testAlBl() < 320) {
+        UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
         doReelTest();
     }
 
@@ -147,6 +161,7 @@ void Tester::handleWaitingState() {
     if (WirePluggedIn(ReferenceBroken)) {
         // Check if enough time has passed since last special test exit
         if (lastSpecialTestExit == 0 || (millis() - lastSpecialTestExit) > WIRE_TEST_DELAY) {
+            UpdateThresholdsWithLeadResistance(0.0);
             currentState = WireTesting_1;
             noWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
             timeToSwitch = WIRE_TEST_1_TIMEOUT;
@@ -179,13 +194,22 @@ void Tester::handleWireTestingState1() {
             ledPanel->SetLine(i, ledPanel->m_Green);
         }
         // This is the time to update the threasholds with the lead resistance
+
         if (testStraightOnly(myRefs_Ohm[1])) {
             for (int i = 0; i < 3; i++) {
                 leadresistances[i] = mycalibrator.get_resistance_empirical(measurements[i][i] / 1000.0);
+                AverageLeadResistance += leadresistances[i];
                 printf("Resistance lead[%d] = %.2f Ohm\n", i, leadresistances[i]);
                 fflush(stdout);                 // Force flush
                 vTaskDelay(pdMS_TO_TICKS(10));  // Small delay
             }
+            if (AverageLeadResistance > 0.0) {
+                AverageLeadResistance /= 3.0;
+            } else {
+                AverageLeadResistance /= 0.0;
+            }
+            printf("Average lead resistance = %f & setting blue\n", AverageLeadResistance);
+            LedPanel->SetBlinkColor(LedPanel->m_Blue);
         }
         ledPanel->myShow();
         esp_task_wdt_reset();
