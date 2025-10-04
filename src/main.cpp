@@ -439,7 +439,7 @@ void loop() {
 extern "C" void app_main() {
     // esp_sleep_enable_timer_wakeup(1500000);  // 1.5 seconds in microseconds to
     // esp_light_sleep_start();                 // or esp_deep_sleep_start() if you want a full reset
-    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    /*esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
 
     if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) {
         // Fresh power-on or reset
@@ -448,7 +448,7 @@ extern "C" void app_main() {
         esp_deep_sleep_start();
         // never returns
     }
-
+*/
     // Call Arduino setup and loop
     initArduino();  // Initialize Arduino if needed
     setup();
