@@ -14,6 +14,7 @@ typedef enum { SHAPE_F, SHAPE_E, SHAPE_S, SHAPE_P, SHAPE_DIAMOND, SHAPE_SQUARE, 
 // Timeout constants
 constexpr int WIRE_TEST_1_TIMEOUT = 3;
 constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT = 2;
+constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT_REEL = 7;
 constexpr int FOIL_TEST_TIMEOUT = 1000;
 constexpr int WIRE_TEST_DELAY = 2000;  // 2 seconds delay after special test exit
 

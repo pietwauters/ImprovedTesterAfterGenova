@@ -121,42 +121,60 @@ void Tester::taskLoop() {
 void Tester::handleWaitingState() {
     // Always update measurements first
     testWiresOnByOne();
-    ledPanel->Blink();
+    if (ReelMode) {
+        if (ShowingShape != SHAPE_R) {
+            LedPanel->ClearAll();
+            LedPanel->Draw_R(LedPanel->m_Green);
+            LedPanel->myShow();
+            ShowingShape = SHAPE_R;
+        }
+        esp_task_wdt_reset();
+        if (testAlBl() < Ohm_50) {
+            currentState = Waiting;
+            ShowingShape = SHAPE_NONE;
+            LedPanel->ClearAll();
+            LedPanel->myShow();
+            SetWiretestMode(false);
+            vTaskDelay(1000 / portTICK_PERIOD_MS);  // Small delay to prevent watchdog issues
+        }
 
-    // Check for special test modes
+    } else {
+        ledPanel->Blink();
 
-    if (testArCr() < 160) {
-        currentState = EpeeTesting;
-        UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
-        doEpeeTest();
-        doCommonReturnFromSpecialMode();
-        lastSpecialTestExit = millis();
-    } else if (testArBr() < 160) {
-        ledPanel->ClearAll();
-        UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
-        doFoilTest();
+        // Check for special test modes
 
-        doCommonReturnFromSpecialMode();
-        lastSpecialTestExit = millis();
-    } else if (testBrCr() < 160) {
-        UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
-        doLameTest();
+        if (testArCr() < Ohm_20) {
+            currentState = EpeeTesting;
+            UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
+            doEpeeTest();
+            doCommonReturnFromSpecialMode();
+            lastSpecialTestExit = millis();
+        } else if (testArBr() < Ohm_20) {
+            ledPanel->ClearAll();
+            UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
+            doFoilTest();
 
-        doCommonReturnFromSpecialMode();
-        lastSpecialTestExit = millis();
-    } else if ((testCrCl() < 160) && (measurements[1][1] > 160) && (measurements[2][2] > 160)) {
-        UpdateThresholdsWithLeadResistance(AverageLeadResistance);
-        doLameTest_Top();
+            doCommonReturnFromSpecialMode();
+            lastSpecialTestExit = millis();
+        } else if (testBrCr() < Ohm_20) {
+            UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
+            doLameTest();
 
-        doCommonReturnFromSpecialMode();
-        lastSpecialTestExit = millis();
-    } else if (testAlBl() < 320) {
-        UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
-        doReelTest();
+            doCommonReturnFromSpecialMode();
+            lastSpecialTestExit = millis();
+        } else if ((testCrCl() < Ohm_20) && (measurements[1][1] > 160) && (measurements[2][2] > 160)) {
+            UpdateThresholdsWithLeadResistance(AverageLeadResistance);
+            doLameTest_Top();
+
+            doCommonReturnFromSpecialMode();
+            lastSpecialTestExit = millis();
+        } else if (testAlBl() < Ohm_50) {
+            UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
+            doReelTest();
+        }
+
+        esp_task_wdt_reset();
     }
-
-    esp_task_wdt_reset();
-
     // Check for wire testing mode with delay after special tests
     if (WirePluggedIn(ReferenceBroken)) {
         // Check if enough time has passed since last special test exit
@@ -165,6 +183,9 @@ void Tester::handleWaitingState() {
             currentState = WireTesting_1;
             noWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
             timeToSwitch = WIRE_TEST_1_TIMEOUT;
+            ShowingShape = SHAPE_NONE;
+            LedPanel->ClearAll();
+            LedPanel->myShow();
         }
         // If not enough time has passed, stay in Waiting mode
     }
@@ -185,7 +206,8 @@ void Tester::handleWireTestingState1() {
         }
         if (!noWireTimeout) {
             currentState = Waiting;
-            SetWiretestMode(false);
+            ShowingShape = SHAPE_NONE;
+            // SetWiretestMode(false);
         }
     }
 
@@ -244,6 +266,7 @@ void Tester::handleWireTestingState2() {
     timeToSwitch = 3;
     ledPanel->ClearAll();
     ledPanel->myShow();
+    ShowingShape = SHAPE_NONE;
     currentState = Waiting;
     SetWiretestMode(false);
 }
@@ -311,6 +334,7 @@ void Tester::doReelTest() {
         esp_task_wdt_reset();
         testWiresOnByOne();
     }
+    ShowingShape = SHAPE_NONE;
     LedPanel->ClearAll();
     LedPanel->myShow();
 }
