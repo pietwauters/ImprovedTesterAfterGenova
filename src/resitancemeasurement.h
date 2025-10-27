@@ -20,6 +20,7 @@ void testWiresOnByOne();
 bool WirePluggedIn(int threashold = 160);
 bool WirePluggedInFoil(int threashold = 160);
 bool WirePluggedInEpee(int threashold = 160);
+bool WirePluggedInLameTopTesting(int threashold = 160);
 bool testStraightOnly(int threashold = 160);
 int testArBr();
 int testArCr();

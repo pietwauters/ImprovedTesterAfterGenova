@@ -56,6 +56,7 @@ class Tester {
     bool delayAndTestWirePluggedIn(long delay);
     bool delayAndTestWirePluggedInFoil(long delay);
     bool delayAndTestWirePluggedInEpee(long delay);
+    bool delayAndTestWirePluggedInLameTestTop(long delay);
     void doEpeeTest();
     void doFoilTest();
     void doLameTest();

@@ -324,6 +324,18 @@ bool Tester::delayAndTestWirePluggedInEpee(long delay) {
     return false;
 }
 
+bool Tester::delayAndTestWirePluggedInLameTestTop(long delay) {
+    long returnTime = millis() + delay;
+    while (millis() < returnTime) {
+        esp_task_wdt_reset();
+        testWiresOnByOne();
+        if (WirePluggedInLameTopTesting()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void Tester::doReelTest() {
     ShowingShape = SHAPE_R;
     LedPanel->ClearAll();
@@ -599,24 +611,31 @@ void Tester::doLameTest() {
     LedPanel->ClearAll();
     LedPanel->myShow();
 }
+bool DebounceTest(int testvalue) {
+    testWiresOnByOne();
+    if (WirePluggedInLameTopTesting()) {
+        return false;
+    }
+    return testCrCl() < testvalue;
+}
 
 void Tester::doLameTest_Top() {
     // Your existing DoLameTest code
     bool bShowingRed = false;
     testWiresOnByOne();
-    while (!WirePluggedInEpee()) {
+    while (!WirePluggedInLameTopTesting()) {
         esp_task_wdt_reset();
         if (testCrCl() < myRefs_Ohm[5]) {
             LedPanel->DrawDiamond(LedPanel->m_Green);
             bShowingRed = false;
             // while((testBrCr()<myRefs_Ohm[5])){esp_task_wdt_reset();};
-            while (debouncedCondition([this]() { return testCrCl() < myRefs_Ohm[5]; }, 10));
+            while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[5]); }, 10));
         } else {
             if (testCrCl() < myRefs_Ohm[10]) {
                 LedPanel->DrawDiamond(LedPanel->m_Yellow);
                 bShowingRed = false;
                 // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
-                while (debouncedCondition([this]() { return testCrCl() < myRefs_Ohm[10]; }, 10));
+                while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[10]); }, 10));
             }
         }
 
@@ -625,7 +644,7 @@ void Tester::doLameTest_Top() {
         bShowingRed = true;
         esp_task_wdt_reset();
 
-        if (delayAndTestWirePluggedInEpee(250))
+        if (delayAndTestWirePluggedInLameTestTop(250))
             break;
         esp_task_wdt_reset();
         testWiresOnByOne();
