@@ -12,7 +12,7 @@ typedef enum { Waiting, EpeeTesting, FoilTesting, LameTesting, WireTesting_1, Wi
 typedef enum { SHAPE_F, SHAPE_E, SHAPE_S, SHAPE_P, SHAPE_DIAMOND, SHAPE_SQUARE, SHAPE_R, SHAPE_NONE } Shapes_t;
 
 // Timeout constants
-constexpr int WIRE_TEST_1_TIMEOUT = 3;
+constexpr int WIRE_TEST_1_TIMEOUT = 2;
 constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT = 2;
 constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT_REEL = 7;
 constexpr int FOIL_TEST_TIMEOUT = 1000;
@@ -66,7 +66,7 @@ class Tester {
     void SetWiretestMode(bool Reelmode);
     bool GetWiretestMode() { return ReelMode; };
 
-    bool doQuickCheck();
+    bool doQuickCheck(bool bClearAtTheEnd = true);
     void handleWaitingState();
     void handleWireTestingState1();
     void handleWireTestingState2();

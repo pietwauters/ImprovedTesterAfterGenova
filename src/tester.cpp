@@ -212,9 +212,14 @@ void Tester::handleWireTestingState1() {
     }
 
     if (!timeToSwitch) {
-        for (int i = 0; i < 5; i += 2) {
+        // The commented code set all lines to green for the next phase;
+        // But this is confusing, because if you go to the next phase with yellow or orange
+        // Everything suddenly becomes green
+        /*for (int i = 0; i < 5; i += 2) {
             ledPanel->SetLine(i, ledPanel->m_Green);
-        }
+        }*/
+        doQuickCheck(false);  // check one more time (just to keep the correct colors)
+
         // This is the time to update the threasholds with the lead resistance
 
         if (testStraightOnly(myRefs_Ohm[1])) {
@@ -707,7 +712,7 @@ bool Tester::animateSingleWire(int wireIndex, bool ReelMode) {
     return bOK;
 }
 
-bool Tester::doQuickCheck() {
+bool Tester::doQuickCheck(bool bClearAtTheEnd) {
     // Your existing DoQuickCheck code
     bool bAllGood = true;
     testWiresOnByOne();
@@ -717,8 +722,11 @@ bool Tester::doQuickCheck() {
     esp_task_wdt_reset();
     vTaskDelay(500 / portTICK_PERIOD_MS);
     esp_task_wdt_reset();
-    ledPanel->ClearAll();
-    esp_task_wdt_reset();
+    if (bClearAtTheEnd) {
+        ledPanel->ClearAll();
+        esp_task_wdt_reset();
+    }
+
     vTaskDelay(300 / portTICK_PERIOD_MS);
     esp_task_wdt_reset();
     return bAllGood;
