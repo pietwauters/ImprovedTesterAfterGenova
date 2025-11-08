@@ -30,6 +30,7 @@ void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
         printf("Threshold[%d] = %d\n", i, myRefs_Ohm[i]);
     }
     Ohm_20 = mycalibrator.get_adc_threshold_for_resistance_with_leads(20.0, RLead);
+    Ohm_25 = mycalibrator.get_adc_threshold_for_resistance_with_leads(25.0, RLead);
     Ohm_30 = mycalibrator.get_adc_threshold_for_resistance_with_leads(30.0, RLead);
     Ohm_50 = mycalibrator.get_adc_threshold_for_resistance_with_leads(50.0, RLead);
 }
@@ -606,9 +607,15 @@ void Tester::doLameTest() {
                 bShowingRed = false;
                 // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
                 while (debouncedCondition([this]() { return testBrCr() < myRefs_Ohm[10]; }, 10));
+            } else {
+                if (testBrCr() < Ohm_25) {
+                    LedPanel->DrawDiamond(LedPanel->m_Orange);
+                    bShowingRed = false;
+                    // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
+                    while (debouncedCondition([this]() { return testBrCr() < Ohm_25; }, 10));
+                }
             }
         }
-
         if (!bShowingRed)
             LedPanel->DrawDiamond(LedPanel->m_Red);
         bShowingRed = true;
@@ -622,6 +629,7 @@ void Tester::doLameTest() {
     LedPanel->ClearAll();
     LedPanel->myShow();
 }
+
 bool DebounceTest(int testvalue) {
     testWiresOnByOne();
     if (WirePluggedInLameTopTesting()) {
@@ -647,6 +655,13 @@ void Tester::doLameTest_Top() {
                 bShowingRed = false;
                 // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
                 while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[10]); }, 10));
+            } else {
+                if (testCrCl() < Ohm_25) {
+                    LedPanel->DrawDiamond(LedPanel->m_Orange);
+                    bShowingRed = false;
+                    // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
+                    while (debouncedCondition([this]() { return DebounceTest(Ohm_25); }, 10));
+                }
             }
         }
 

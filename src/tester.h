@@ -37,6 +37,7 @@ class Tester {
     // Add reference values as class members (correct type: int)
     int myRefs_Ohm[11];  // Pointer to reference values
     int Ohm_20;
+    int Ohm_25;
     int Ohm_30;
     int Ohm_50;
     int ReferenceBroken = myRefs_Ohm[10];
