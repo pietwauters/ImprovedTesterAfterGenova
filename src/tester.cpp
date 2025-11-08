@@ -250,25 +250,31 @@ void Tester::handleWireTestingState1() {
 // Wiretesting2 is only looking for breaks. Resistances have been checked in phase 1
 // So I'm using a relatively high and fixed value
 void Tester::handleWireTestingState2() {
-    for (int i = 100000; i > 0; i--) {
-        esp_task_wdt_reset();
-        if (!testStraightOnly(ReferenceBroken)) {
-            i = 0;
+    testWiresOnByOne();
+    while (WirePluggedIn(ReferenceBroken)) {
+        for (int i = 100000; i > 0; i--) {
+            esp_task_wdt_reset();
+            if (!testStraightOnly(ReferenceBroken)) {
+                i = 0;
+            }
         }
+
+        ledPanel->ClearAll();
+        ledPanel->myShow();
+
+        for (int i = 0; i < 3; i++) {
+            allGood &= animateSingleWire(i);
+        }
+
+        esp_task_wdt_reset();
+        vTaskDelay(1500 / portTICK_PERIOD_MS);
+        esp_task_wdt_reset();
+        ledPanel->ClearAll();
+        ledPanel->myShow();
+        doQuickCheck(false);  // check one more time (just to keep the correct colors)
+        testWiresOnByOne();
     }
-
-    ledPanel->ClearAll();
-    ledPanel->myShow();
-
-    for (int i = 0; i < 3; i++) {
-        allGood &= animateSingleWire(i);
-    }
-
-    esp_task_wdt_reset();
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
-    esp_task_wdt_reset();
-
-    timeToSwitch = 3;
+    timeToSwitch = WIRE_TEST_1_TIMEOUT;
     ledPanel->ClearAll();
     ledPanel->myShow();
     ShowingShape = SHAPE_NONE;
