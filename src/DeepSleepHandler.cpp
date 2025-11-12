@@ -150,43 +150,49 @@ void DeepSleepHandler::addHighImpedancePin(gpio_num_t pin) {
 }
 
 void DeepSleepHandler::enterDeepSleep() {
-    uint64_t bitmask = buildWakeupBitmask();
-    // Use ext1 as a wake-up source
-    esp_sleep_enable_ext1_wakeup(bitmask, ESP_EXT1_WAKEUP_ANY_HIGH);
+    // Only configure ext1 wakeup if there are wakeup pins configured
+    if (!wakeupPins.empty()) {
+        uint64_t bitmask = buildWakeupBitmask();
+        // Use ext1 as a wake-up source
+        esp_sleep_enable_ext1_wakeup(bitmask, ESP_EXT1_WAKEUP_ANY_HIGH);
 
-    // Waarschijnlijk moet ik van de ADC pinnen eerst nog gewone IO pinnen maken
-    for (const auto& wakeupPin : wakeupPins) {
-        rtc_gpio_init(wakeupPin.pin);
-        rtc_gpio_set_direction(wakeupPin.pin, RTC_GPIO_MODE_INPUT_ONLY);
-        // Set pull-up or pull-down based on trigger type
-        if (wakeupPin.trigger == WakeupTrigger::WAKE_HIGH || wakeupPin.trigger == WakeupTrigger::WAKE_RISING) {
-            rtc_gpio_pullup_dis(wakeupPin.pin);
-            rtc_gpio_pulldown_en(wakeupPin.pin);
-        } else if (wakeupPin.trigger == WakeupTrigger::WAKE_LOW || wakeupPin.trigger == WakeupTrigger::WAKE_FALLING) {
-            rtc_gpio_pulldown_dis(wakeupPin.pin);
-            rtc_gpio_pullup_en(wakeupPin.pin);
+        // Waarschijnlijk moet ik van de ADC pinnen eerst nog gewone IO pinnen maken
+        for (const auto& wakeupPin : wakeupPins) {
+            rtc_gpio_init(wakeupPin.pin);
+            rtc_gpio_set_direction(wakeupPin.pin, RTC_GPIO_MODE_INPUT_ONLY);
+            // Set pull-up or pull-down based on trigger type
+            if (wakeupPin.trigger == WakeupTrigger::WAKE_HIGH || wakeupPin.trigger == WakeupTrigger::WAKE_RISING) {
+                rtc_gpio_pullup_dis(wakeupPin.pin);
+                rtc_gpio_pulldown_en(wakeupPin.pin);
+            } else if (wakeupPin.trigger == WakeupTrigger::WAKE_LOW ||
+                       wakeupPin.trigger == WakeupTrigger::WAKE_FALLING) {
+                rtc_gpio_pulldown_dis(wakeupPin.pin);
+                rtc_gpio_pullup_en(wakeupPin.pin);
+            }
         }
     }
-    // Set all pins to their values, also non-hold-capable pins
-    for (const auto& holdPin : holdPins) {
-        pinMode(holdPin.pin, OUTPUT);
-        digitalWrite(holdPin.pin, holdPin.value);
-    }
-    vTaskDelay(300 / portTICK_PERIOD_MS);
-    // Enable GPIO hold for all hold-capable pins
-    gpio_deep_sleep_hold_en();
-    for (const auto& holdPin : holdPins) {
-        if (rtc_gpio_is_valid_gpio(holdPin.pin)) {
-            gpio_hold_en(holdPin.pin);
-            Serial.printf("GPIO hold enabled for pin %d with value %d\n", holdPin.pin, holdPin.value);
-        } else {
-            Serial.printf("ERROR: Pin %d is not valid for GPIO hold!\n", holdPin.pin);
+    // Only configure hold pins if there are hold pins configured
+    if (!holdPins.empty()) {
+        // Set all pins to their values, also non-hold-capable pins
+        for (const auto& holdPin : holdPins) {
+            pinMode(holdPin.pin, OUTPUT);
+            digitalWrite(holdPin.pin, holdPin.value);
         }
+        vTaskDelay(300 / portTICK_PERIOD_MS);
+        // Enable GPIO hold for all hold-capable pins
+        gpio_deep_sleep_hold_en();
+        for (const auto& holdPin : holdPins) {
+            if (rtc_gpio_is_valid_gpio(holdPin.pin)) {
+                gpio_hold_en(holdPin.pin);
+                Serial.printf("GPIO hold enabled for pin %d with value %d\n", holdPin.pin, holdPin.value);
+            } else {
+                Serial.printf("ERROR: Pin %d is not valid for GPIO hold!\n", holdPin.pin);
+            }
+        }
+        vTaskDelay(300 / portTICK_PERIOD_MS);
     }
-    vTaskDelay(300 / portTICK_PERIOD_MS);
-    esp_task_wdt_deinit();  // <--- Add this line to disable the task WDT
 
-    Serial.println("Entering deep sleep...");
+    esp_task_wdt_deinit();  // <--- Add this line to disable the task WDT    Serial.println("Entering deep sleep...");
     Serial.flush();
     esp_deep_sleep_start();
 }
