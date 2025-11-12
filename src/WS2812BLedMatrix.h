@@ -77,11 +77,13 @@ class WS2812B_LedMatrix {
     void Draw_P(uint32_t theColor);
     void Draw_C(uint32_t theColor);
     void Draw_R(uint32_t theColor);
+    void Draw_SinglePixel(int Pixel, uint32_t theColor) { m_pixels->setPixelColor(Pixel, theColor); };
     void SequenceTest();
     void ConfigureBlinking(int PixelNr, uint32_t theColor, int OnTime = 100, int OffTime = 100, int Repeat = 0);
     void Blink();
     void RestartBlink();
     void SetBlinkColor(uint32_t theColor) { m_BlinkingColor = theColor; };
+    bool GetBlinkState() { return m_BlinkingState; };
 
     uint32_t m_Red;
     uint32_t m_Purple;
