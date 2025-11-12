@@ -61,6 +61,15 @@ void Tester::begin() {
     }
     UpdateThresholdsWithLeadResistance(0.0);
     SetWiretestMode(false);  // Normal mode, not Reel testing
+    LedPanel->RestartBlink();
+
+    // Below code lets you make a difference in lowpower time between cold boot and deep sleep
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+    if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        StartForLowPower = millis() + 90000;
+    } else {
+        StartForLowPower = 0;
+    }
     // Create the tester task
     xTaskCreatePinnedToCore(testerTaskWrapper, "TesterTask",
                             8192,  // Stack size
@@ -141,7 +150,16 @@ void Tester::handleWaitingState() {
 
     } else {
         ledPanel->Blink();
-
+#ifdef DOTHETRICK
+        if (!wifiPowerManager().getSecondsUntilTimeout() && (StartForLowPower < millis())) {
+            if (!ledPanel->GetBlinkState()) {
+                LedPanel->ClearAll();
+                LedPanel->myShow();
+                myDeepSleepHandler.enableTimerWakeup(2000000);
+                myDeepSleepHandler.enterDeepSleep();
+            }
+        }
+#endif
         // Check for special test modes
 
         if (testArCr() < Ohm_20) {
@@ -600,29 +618,44 @@ void Tester::doLameTest() {
             LedPanel->DrawDiamond(LedPanel->m_Green);
             bShowingRed = false;
             // while((testBrCr()<myRefs_Ohm[5])){esp_task_wdt_reset();};
-            while (debouncedCondition([this]() { return testBrCr() < myRefs_Ohm[5]; }, 10));
+            while (debouncedCondition(
+                [this]() {
+                    int temp = testBrCr();
+                    return temp < myRefs_Ohm[5];
+                },
+                10));
         } else {
             if (testBrCr() < myRefs_Ohm[10]) {
                 LedPanel->DrawDiamond(LedPanel->m_Yellow);
                 bShowingRed = false;
                 // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
-                while (debouncedCondition([this]() { return testBrCr() < myRefs_Ohm[10]; }, 10));
+                while (debouncedCondition(
+                    [this]() {
+                        int temp = testBrCr();
+                        return ((temp < myRefs_Ohm[10]) && (temp >= myRefs_Ohm[5]));
+                    },
+                    10));
             } else {
                 if (testBrCr() < Ohm_25) {
                     LedPanel->DrawDiamond(LedPanel->m_Orange);
                     bShowingRed = false;
                     // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
-                    while (debouncedCondition([this]() { return testBrCr() < Ohm_25; }, 10));
+                    while (debouncedCondition(
+                        [this]() {
+                            int temp = testBrCr();
+                            return ((temp < myRefs_Ohm[25]) && (temp >= myRefs_Ohm[10]));
+                        },
+                        10));
+                } else {
+                    // Do Red stuff
+                    bShowingRed = true;
+                    LedPanel->DrawDiamond(LedPanel->m_Red);
+                    if (delayAndTestWirePluggedIn(250))
+                        break;
                 }
             }
         }
-        if (!bShowingRed)
-            LedPanel->DrawDiamond(LedPanel->m_Red);
-        bShowingRed = true;
-        esp_task_wdt_reset();
 
-        if (delayAndTestWirePluggedIn(250))
-            break;
         esp_task_wdt_reset();
         testWiresOnByOne();
     }
@@ -630,12 +663,12 @@ void Tester::doLameTest() {
     LedPanel->myShow();
 }
 
-bool DebounceTest(int testvalue) {
+bool DebounceTest(int LowBound, int HighBound) {
     testWiresOnByOne();
     if (WirePluggedInLameTopTesting()) {
         return false;
     }
-    return testCrCl() < testvalue;
+    return ((testCrCl() >= LowBound) && (testCrCl() < HighBound));
 }
 
 void Tester::doLameTest_Top() {
@@ -647,31 +680,28 @@ void Tester::doLameTest_Top() {
         if (testCrCl() < myRefs_Ohm[5]) {
             LedPanel->DrawDiamond(LedPanel->m_Green);
             bShowingRed = false;
-            // while((testBrCr()<myRefs_Ohm[5])){esp_task_wdt_reset();};
-            while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[5]); }, 10));
+
+            while (debouncedCondition([this]() { return DebounceTest(0, myRefs_Ohm[5]); }, 10));
         } else {
             if (testCrCl() < myRefs_Ohm[10]) {
                 LedPanel->DrawDiamond(LedPanel->m_Yellow);
                 bShowingRed = false;
-                // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
-                while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[10]); }, 10));
+                while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[5], myRefs_Ohm[10]); }, 10));
             } else {
                 if (testCrCl() < Ohm_25) {
                     LedPanel->DrawDiamond(LedPanel->m_Orange);
                     bShowingRed = false;
                     // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
-                    while (debouncedCondition([this]() { return DebounceTest(Ohm_25); }, 10));
+                    while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[10], Ohm_25); }, 10));
+                } else {
+                    LedPanel->DrawDiamond(LedPanel->m_Red);
+                    bShowingRed = true;
+                    if (delayAndTestWirePluggedInLameTestTop(250))
+                        break;
                 }
             }
         }
 
-        if (!bShowingRed)
-            LedPanel->DrawDiamond(LedPanel->m_Red);
-        bShowingRed = true;
-        esp_task_wdt_reset();
-
-        if (delayAndTestWirePluggedInLameTestTop(250))
-            break;
         esp_task_wdt_reset();
         testWiresOnByOne();
     }

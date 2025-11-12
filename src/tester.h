@@ -2,7 +2,9 @@
 
 #include <Arduino.h>
 
+#include "DeepSleepHandler.h"
 #include "WS2812BLedMatrix.h"
+#include "WiFiPowerManager.h"
 #include "adc_calibrator.h"
 #include "esp_task_wdt.h"
 #include "resitancemeasurement.h"
@@ -27,6 +29,10 @@ class Tester {
     bool allGood;
     unsigned long lastSpecialTestExit;
     Shapes_t ShowingShape = SHAPE_NONE;
+
+    DeepSleepHandler myDeepSleepHandler;
+    long StartForLowPower;
+    int WaitingStateCounter;
 
     // Task handle
     TaskHandle_t testerTaskHandle;
