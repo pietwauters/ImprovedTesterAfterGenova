@@ -43,6 +43,7 @@ using namespace std;
 #include "esp_log.h"
 #include "soc/io_mux_reg.h"  // For IO_MUX register definitions
 #include "tester.h"
+
 void disableRadioForTesting() {
     Serial.println("=== TEMPORARILY DISABLING RADIO FOR TESTING ===");
 
@@ -67,6 +68,7 @@ int Vmax = 2992;
 volatile bool DoCalibration = false;
 bool MirrorMode = true;  // Default to no mirror mode
 bool IgnoreCalibrationWarning = false;
+bool ShowWelcome = true;
 int CalibrationDisplayChannel = 0;   // Default to channel 0
 bool CalibrationAutoMode = false;    // Auto mode flag
 int Brightness = BRIGHTNESS_NORMAL;  // Default brightness level
@@ -117,11 +119,9 @@ void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
                              }
                          
                              if (args[0] == "on") {
-                                 DoCalibration = true;
-                                 // Keep WiFi on during calibration
-                                 wifiPowerManager.keepWiFiOn("calibration");
-                         
-                                 // Set which channel to display
+                                DoCalibration = true;
+                                // Keep WiFi on during calibration
+                                wifiPowerManager().keepWiFiOn("calibration");                                 // Set which channel to display
                                  if (args.size() > 1) {
                                      if (args[1] == "auto") {
                                          CalibrationAutoMode = true;
@@ -304,13 +304,17 @@ void LoadSettings() {
     settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
     settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
     settings.addBool("IgnoreCalibrationWarning", "Ignore warning to Calibrate?", &IgnoreCalibrationWarning);
+    settings.addBool("ShowWelcome", "Show welcome lights (for debugging)?", &ShowWelcome);
     settings.addInt("Brightness", "Display brightness 1-255", &Brightness);
     settings.addString("name", "Device Name", &deviceName);
     // settings.addInt("R1_R2", "R1_R2 (total resistance (Ron + 2 x 47)", &R0);
     // settings.addInt("Vmax", "Vmax in mV", &Vmax);
     settings.begin("Settings");  // for Preferences namespace
     settings.load();
-
+    if (!settings.keyExists("ShowWelcome")) {
+        ShowWelcome = true;
+        settings.save();
+    }
     if (Brightness < 1) {
         Brightness = BRIGHTNESS_NORMAL;
     }
@@ -322,12 +326,12 @@ void SetupNetworkStuff() {
 
     // Setup ElegantOTA with callbacks for WiFi power management
     ElegantOTA.begin(&server);
-    ElegantOTA.onStart([]() { wifiPowerManager.onOTAStart(); });
+    ElegantOTA.onStart([]() { wifiPowerManager().onOTAStart(); });
     ElegantOTA.onEnd([](bool success) {
         if (success) {
-            wifiPowerManager.onOTAEnd();
+            wifiPowerManager().onOTAEnd();
         } else {
-            wifiPowerManager.onOTAError();
+            wifiPowerManager().onOTAError();
         }
     });
 
@@ -344,7 +348,7 @@ void SetupNetworkStuff() {
     settings.setPostSaveCallback(synchronizeThresholdValues);
 
     // Initialize WiFi Power Manager after WiFi setup
-    wifiPowerManager.begin();
+    wifiPowerManager().begin();
 }
 
 void setupSerialTerminal() {
@@ -391,10 +395,12 @@ void setup() {
 
     LedPanel->ConfigureBlinking(12, LedPanel->m_Red, 100, 2000, 0);
     LedPanel->SetBrightness((uint8_t)Brightness);  // Set the brightness level for the LED panel
-    // LedPanel->Draw_R(LedPanel->m_Red);
-    // vTaskDelay(10000 / portTICK_PERIOD_MS);
-    LedPanel->SequenceTest();
-
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+    if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        if (ShowWelcome) {
+            LedPanel->SequenceTest();
+        }
+    }
     // Setup serial terminal first, before other initialization
     setupSerialTerminal();
 
@@ -404,10 +410,7 @@ void setup() {
     printf("App version: %s\n", APP_VERSION);
     init_AD();
     Set_IODirectionAndValue(IODirection_br_bl, IOValues_br_bl);
-    SetupNetworkStuff();
-    //  Explicitly disable Wifi and Bluetooth
-    // disableRadioForTesting();
-    // Create the tester instance
+
     tester = new Tester(LedPanel);
     tester->setIgnoreCalibrationWarning(IgnoreCalibrationWarning);
 
@@ -417,17 +420,24 @@ void setup() {
     // Remove the idle task from the WDT (do this for both cores)
     esp_task_wdt_delete(xTaskGetIdleTaskHandleForCPU(0));
     esp_task_wdt_delete(xTaskGetIdleTaskHandleForCPU(1));
+
+    if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        SetupNetworkStuff();
+    }
+    //  Explicitly disable Wifi and Bluetooth
+    // disableRadioForTesting();
+    // Create the tester instance
 }
 
 void loop() {
-    vTaskDelay(10 / portTICK_PERIOD_MS);
+    vTaskDelay(50 / portTICK_PERIOD_MS);
 
     // Always run serial terminal
     serialTerminal.loop();
     esp_task_wdt_reset();
 
     // Run WiFi power management
-    wifiPowerManager.loop();
+    wifiPowerManager().loop();
     esp_task_wdt_reset();
 
     ElegantOTA.loop();
