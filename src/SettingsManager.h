@@ -37,6 +37,14 @@ class SettingsManager {
 
     void addWebEndpoints(AsyncWebServer& server);
 
+    // Check if a key exists in NVS
+    bool keyExists(const String& key);
+    bool keyExists(const char* key);
+
+    // Check if a setting (from registered settings) exists in NVS
+    bool settingExists(const String& settingKey);
+    bool settingExists(const char* settingKey);
+
     // Add callback for when settings are saved via web interface
     void setPostSaveCallback(std::function<void()> callback);
 

@@ -113,6 +113,53 @@ void SettingsManager::save() {
     // ESP.restart();
 }
 
+bool SettingsManager::keyExists(const String& key) {
+    prefs.begin(namespaceStr.c_str(), true);  // Read-only mode
+    bool exists = prefs.isKey(key.c_str());
+    prefs.end();
+    return exists;
+}
+
+bool SettingsManager::keyExists(const char* key) { return keyExists(String(key)); }
+
+bool SettingsManager::settingExists(const String& settingKey) {
+    // First, check if this is a registered setting
+    bool isRegisteredSetting = false;
+    SettingType settingType = BOOL;  // Default value
+    size_t settingSize = 0;
+
+    for (const auto& s : settings) {
+        if (s.key == settingKey) {
+            isRegisteredSetting = true;
+            settingType = s.type;
+            settingSize = s.size;
+            break;
+        }
+    }
+
+    if (!isRegisteredSetting) {
+        // Not a registered setting, just check if the key exists
+        return keyExists(getPrefKey(settingKey));
+    }
+
+    // For registered settings, check based on type
+    if (settingType == ARRAY_INT || settingType == ARRAY_FLOAT) {
+        // For arrays, check if all elements exist
+        for (size_t i = 0; i < settingSize; i++) {
+            String indexedKey = getPrefKey(settingKey + "_" + String(i));
+            if (!keyExists(indexedKey)) {
+                return false;
+            }
+        }
+        return true;
+    } else {
+        // For non-array types, check the single key
+        return keyExists(getPrefKey(settingKey));
+    }
+}
+
+bool SettingsManager::settingExists(const char* settingKey) { return settingExists(String(settingKey)); }
+
 uint32_t SettingsManager::fnv1aHash(const String& str) {
     const uint32_t FNV_PRIME = 0x01000193;
     uint32_t hash = 0x811c9dc5;
