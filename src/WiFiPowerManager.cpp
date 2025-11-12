@@ -4,12 +4,25 @@
 
 #include "esp_wifi.h"
 
-// Create global instance
-WiFiPowerManager wifiPowerManager;
+// Singleton implementation
+WiFiPowerManager& WiFiPowerManager::getInstance() {
+    static WiFiPowerManager instance;
+    return instance;
+}
 
-WiFiPowerManager::WiFiPowerManager() : lastActivityTime(0), wifiEnabled(false), autoManagementEnabled(true) {}
+WiFiPowerManager::WiFiPowerManager()
+    : lastActivityTime(0), wifiEnabled(false), autoManagementEnabled(true), initialized(false) {}
 
 void WiFiPowerManager::begin() {
+    // Ensure begin() is called only once
+    if (initialized) {
+        Serial.println("[WiFi PM] Warning: begin() already called, ignoring duplicate call");
+        return;
+    }
+
+    initialized = true;
+    Serial.println("[WiFi PM] Initializing WiFi Power Manager");
+
     // WiFi should already be initialized by main.cpp
     if (WiFi.getMode() != WIFI_OFF) {
         wifiEnabled = true;
@@ -130,8 +143,12 @@ void WiFiPowerManager::onOTAError() {
 }
 
 uint32_t WiFiPowerManager::getSecondsUntilTimeout() const {
-    if (!wifiEnabled || !autoManagementEnabled || hasActiveLocks()) {
-        return 0;  // No timeout (WiFi off, auto-management disabled, or locks active)
+    if (!wifiEnabled || !autoManagementEnabled) {
+        return 0;  // No timeout (WiFi off or auto-management disabled)
+    }
+
+    if (hasActiveLocks()) {
+        return UINT32_MAX;  // Timeout indefinitely postponed due to active locks
     }
 
     uint32_t timeSinceActivity = millis() - lastActivityTime;
@@ -144,14 +161,15 @@ uint32_t WiFiPowerManager::getSecondsUntilTimeout() const {
 
 void WiFiPowerManager::printStatus() const {
     Serial.println("[WiFi PM] === WiFi Power Manager Status ===");
+    Serial.printf("  Initialized: %s\n", initialized ? "Yes" : "No");
     Serial.printf("  WiFi Active: %s\n", wifiEnabled ? "Yes" : "No");
     Serial.printf("  Auto Management: %s\n", autoManagementEnabled ? "Enabled" : "Disabled");
     Serial.printf("  Active Locks: %d\n", activeLocks.size());
 
     if (wifiEnabled && autoManagementEnabled) {
         uint32_t seconds = getSecondsUntilTimeout();
-        if (hasActiveLocks()) {
-            Serial.println("  Timeout: Blocked by active locks");
+        if (seconds == UINT32_MAX) {
+            Serial.println("  Timeout: Indefinitely postponed (active locks)");
         } else if (seconds > 0) {
             Serial.printf("  Time until timeout: %d seconds\n", seconds);
         } else {

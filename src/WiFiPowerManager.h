@@ -12,13 +12,22 @@ class WiFiPowerManager {
     uint32_t lastActivityTime;
     bool wifiEnabled;
     bool autoManagementEnabled;
+    bool initialized;              // Flag to ensure begin() is called only once
     std::set<String> activeLocks;  // Reference counting for WiFi locks
+
+    // Private constructor for singleton
+    WiFiPowerManager();
+
+    // Delete copy constructor and assignment operator
+    WiFiPowerManager(const WiFiPowerManager&) = delete;
+    WiFiPowerManager& operator=(const WiFiPowerManager&) = delete;
 
     // Private methods
     void disableWiFi();
 
    public:
-    WiFiPowerManager();
+    // Singleton getInstance method
+    static WiFiPowerManager& getInstance();
 
     // Core management
     void begin();
@@ -36,6 +45,7 @@ class WiFiPowerManager {
 
     // Status methods
     bool isWiFiActive() const { return wifiEnabled; }
+    bool isInitialized() const { return initialized; }
     uint32_t getSecondsUntilTimeout() const;
     size_t getActiveLockCount() const { return activeLocks.size(); }
 
@@ -52,5 +62,5 @@ class WiFiPowerManager {
     bool shouldDisableWiFi() const;
 };
 
-// Global instance declaration
-extern WiFiPowerManager wifiPowerManager;
+// Global access helper function
+inline WiFiPowerManager& wifiPowerManager() { return WiFiPowerManager::getInstance(); }
