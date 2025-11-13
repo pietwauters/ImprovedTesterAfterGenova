@@ -1,0 +1,156 @@
+/*
+ * RTCMemoryStorage Usage Example
+ * 
+ * This example demonstrates how to use the RTCMemoryStorage class
+ * to store and retrieve integer values across deep sleep cycles.
+ */
+
+#include "RTCMemoryStorage.h"
+#include "esp_log.h"
+#include "esp_sleep.h"
+#include "driver/gpio.h"
+
+static const char* TAG = "RTCExample";
+
+void setup() {
+    Serial.begin(115200);
+    delay(1000); // Give serial time to initialize
+    
+    ESP_LOGI(TAG, "RTC Memory Storage Example Started");
+    
+    // Create RTC storage instance
+    RTCMemoryStorage rtcStorage;
+    
+    // Check if we woke up from deep sleep
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+    
+    switch (wakeup_reason) {
+        case ESP_SLEEP_WAKEUP_EXT0:
+            ESP_LOGI(TAG, "Wakeup caused by external signal using RTC_IO");
+            break;
+        case ESP_SLEEP_WAKEUP_EXT1:
+            ESP_LOGI(TAG, "Wakeup caused by external signal using RTC_CNTL");
+            break;
+        case ESP_SLEEP_WAKEUP_TIMER:
+            ESP_LOGI(TAG, "Wakeup caused by timer");
+            break;
+        case ESP_SLEEP_WAKEUP_TOUCHPAD:
+            ESP_LOGI(TAG, "Wakeup caused by touchpad");
+            break;
+        case ESP_SLEEP_WAKEUP_ULP:
+            ESP_LOGI(TAG, "Wakeup caused by ULP program");
+            break;
+        default:
+            ESP_LOGI(TAG, "Wakeup was not caused by deep sleep: %d", wakeup_reason);
+            break;
+    }
+    
+    // Example 1: Simple counter that persists across reboots
+    int bootCount = rtcStorage.retrieve("boot_count", 0);
+    bootCount++;
+    rtcStorage.store("boot_count", bootCount);
+    ESP_LOGI(TAG, "Boot count: %d", bootCount);
+    
+    // Example 2: Store some configuration values (integers and floats)
+    if (bootCount == 1) {
+        // First boot - store some initial values
+        rtcStorage.store("sensor_threshold", 100);          // Integer
+        rtcStorage.store("measurement_interval", 5000);     // Integer 
+        rtcStorage.store("calibration_offset", -12);        // Integer
+        rtcStorage.store("temperature_offset", -2.5f);      // Float
+        rtcStorage.store("voltage_multiplier", 3.3f);       // Float
+        rtcStorage.store("sensitivity", 0.85f);             // Float
+        ESP_LOGI(TAG, "Stored initial configuration values");
+    }
+    
+    // Example 3: Retrieve configuration values with defaults
+    int threshold = rtcStorage.retrieve("sensor_threshold", 50);     // Default 50 if not found
+    int interval = rtcStorage.retrieve("measurement_interval", 1000); // Default 1000ms if not found
+    int offset = rtcStorage.retrieve("calibration_offset", 0);       // Default 0 if not found
+    
+    // Retrieve float values (using overloaded retrieve method)
+    float tempOffset = rtc.retrieve("temperature_offset", 0.0f);    // Default 0.0 if not found
+    float voltageMultiplier = rtc.retrieve("voltage_multiplier", 5.0f); // Default 5.0 if not found
+    float sensitivity = rtc.retrieve("sensitivity", 1.0f);          // Default 1.0 if not found
+    
+    ESP_LOGI(TAG, "Integer config: threshold=%d, interval=%d, offset=%d", 
+             threshold, interval, offset);
+    ESP_LOGI(TAG, "Float config: temp_offset=%.2f, volt_mult=%.2f, sensitivity=%.2f", 
+             tempOffset, voltageMultiplier, sensitivity);
+    
+    // Example 4: Update values based on some condition
+    if (bootCount % 3 == 0) {
+        // Every third boot, increment the threshold and adjust sensitivity
+        threshold += 10;
+        sensitivity += 0.05f;
+        rtcStorage.store("sensor_threshold", threshold);
+        rtcStorage.store("sensitivity", sensitivity);
+        ESP_LOGI(TAG, "Updated threshold to: %d, sensitivity to: %.2f", threshold, sensitivity);
+    }
+    
+    // Example 5: Check if specific keys exist
+    if (rtcStorage.exists("last_error_code")) {
+        int errorCode = rtcStorage.retrieve("last_error_code");
+        ESP_LOGI(TAG, "Previous error code: %d", errorCode);
+        // Clear the error after reading
+        rtcStorage.remove("last_error_code");
+    } else {
+        ESP_LOGI(TAG, "No previous error code found");
+    }
+    
+    // Example 6: Store error information for next boot (simulate an error)
+    if (bootCount == 5) {
+        rtcStorage.store("last_error_code", 404);           // Integer error code
+        rtcStorage.store("error_voltage", 2.1f);            // Float error voltage
+        ESP_LOGI(TAG, "Stored error information for next boot");
+    }
+    
+    // Example 7: Type safety demonstration
+    if (rtcStorage.exists("sensor_threshold")) {
+        // This works - correct type
+        int correctValue = rtcStorage.retrieve("sensor_threshold", 0);
+        ESP_LOGI(TAG, "Correct type retrieval: %d", correctValue);
+        
+        // This will return default due to type mismatch (integer stored, float requested)
+        float wrongType = rtcStorage.retrieveFloat("sensor_threshold", -1.0f);
+        ESP_LOGI(TAG, "Type mismatch retrieval: %.2f (should be -1.00)", wrongType);
+    }
+    
+    // Print all stored values for debugging
+    rtcStorage.printAll();
+    
+    // Example 8: Demonstrate the clean, overloaded API
+    ESP_LOGI(TAG, "=== Clean API Examples ===");
+    
+    // Store values (same method name for both types)
+    rtcStorage.store("int_example", 123);
+    rtcStorage.store("float_example", 45.67f);
+    
+    // Retrieve values (compiler picks the right method based on default value type)
+    int intExample = rtcStorage.retrieve("int_example", 0);        // int version
+    float floatExample = rtcStorage.retrieve("float_example", 0.0f); // float version
+    
+    ESP_LOGI(TAG, "Retrieved: int=%d, float=%.2f", intExample, floatExample);
+    
+    // Example 9: Demonstrate data validation
+    ESP_LOGI(TAG, "RTC data is %s", rtcStorage.isRTCDataValid() ? "VALID" : "INVALID");
+    
+    ESP_LOGI(TAG, "Storage info: %zu/%zu entries used", 
+             rtcStorage.getEntryCount(), rtcStorage.getMaxEntries());
+    
+    // Sleep for 10 seconds, then wake up using timer
+    ESP_LOGI(TAG, "Going to deep sleep for 10 seconds...");
+    
+    // Configure wake-up timer
+    esp_sleep_enable_timer_wakeup(10 * 1000000); // 10 seconds in microseconds
+    
+    // Optional: Configure wake-up on GPIO (e.g., button press)
+    // esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0); // Wake on LOW level on GPIO0
+    
+    delay(1000); // Give time for serial output
+    esp_deep_sleep_start();
+}
+
+void loop() {
+    // This will never be reached since we go to deep sleep in setup()
+}
