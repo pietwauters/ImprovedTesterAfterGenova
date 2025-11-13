@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "DeepSleepHandler.h"
+#include "RTCMemoryStorage.h"
 #include "WS2812BLedMatrix.h"
 #include "WiFiPowerManager.h"
 #include "adc_calibrator.h"
@@ -39,6 +40,7 @@ class Tester {
 
     // LED Panel reference
     WS2812B_LedMatrix* ledPanel;
+    u_int32_t DefaultBlinkColor;
 
     // Add reference values as class members (correct type: int)
     int myRefs_Ohm[11];  // Pointer to reference values
@@ -52,7 +54,7 @@ class Tester {
     int ReferenceOrange = myRefs_Ohm[10];
     int ReferenceShort = 160;
     bool ReelMode = false;
-
+    RTCMemoryStorage rtc;
     EmpiricalResistorCalibrator mycalibrator;
     float leadresistances[3] = {0.0, 0.0, 0.0};
     float AverageLeadResistance = 0.0;

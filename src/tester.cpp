@@ -24,10 +24,9 @@ Tester::~Tester() {
 }
 
 void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
-    printf("Average lead resistance = %f\n", RLead);
     for (int i = 0; i < 11; i++) {
         myRefs_Ohm[i] = mycalibrator.get_adc_threshold_for_resistance_with_leads(1.0 * i, RLead);
-        printf("Threshold[%d] = %d\n", i, myRefs_Ohm[i]);
+        // printf("Threshold[%d] = %d\n", i, myRefs_Ohm[i]);
     }
     Ohm_20 = mycalibrator.get_adc_threshold_for_resistance_with_leads(20.0, RLead);
     Ohm_25 = mycalibrator.get_adc_threshold_for_resistance_with_leads(25.0, RLead);
@@ -41,7 +40,8 @@ void Tester::begin() {
     if (!mycalibrator.load_calibration_from_nvs()) {
         // No existing calibration, run interactive calibration
         mycalibrator.DoFactoryReset();
-        LedPanel->SetBlinkColor(LedPanel->m_Red);
+        DefaultBlinkColor = LedPanel->m_Red;
+
         if (!IgnoreCalibrationWarning) {
             LedPanel->Draw_C(LedPanel->m_Red);
             LedPanel->myShow();
@@ -50,14 +50,21 @@ void Tester::begin() {
                 mycalibrator.save_calibration_to_nvs();
                 LedPanel->ClearAll();
                 LedPanel->myShow();
-                LedPanel->SetBlinkColor(LedPanel->m_Green);
+
+                DefaultBlinkColor = LedPanel->m_Green;
             } else {
                 mycalibrator.DoFactoryReset();
-                LedPanel->SetBlinkColor(LedPanel->m_Red);
+                DefaultBlinkColor = LedPanel->m_Red;
             }
         }
     } else {
-        LedPanel->SetBlinkColor(LedPanel->m_Green);
+        DefaultBlinkColor = LedPanel->m_Green;
+    }
+    LedPanel->SetBlinkColor(DefaultBlinkColor);
+    AverageLeadResistance = rtc.retrieve("LeadR", 0.0f);
+
+    if (AverageLeadResistance > 0.0) {
+        LedPanel->SetBlinkColor(LedPanel->m_Blue);
     }
     UpdateThresholdsWithLeadResistance(0.0);
     SetWiretestMode(false);  // Normal mode, not Reel testing
@@ -150,13 +157,17 @@ void Tester::handleWaitingState() {
 
     } else {
         ledPanel->Blink();
-#ifdef DOTHETRICK
-        if (!wifiPowerManager().getSecondsUntilTimeout() && (StartForLowPower < millis())) {
-            if (!ledPanel->GetBlinkState()) {
-                LedPanel->ClearAll();
-                LedPanel->myShow();
-                myDeepSleepHandler.enableTimerWakeup(2000000);
-                myDeepSleepHandler.enterDeepSleep();
+#ifndef DOTHETRICK
+        if (LowPowerMode) {
+            if (!wifiPowerManager().getSecondsUntilTimeout() && (StartForLowPower < millis())) {
+                if (!ledPanel->GetBlinkState()) {
+                    LedPanel->ClearAll();
+                    LedPanel->myShow();
+                    // Store float value (lead resistance)
+                    rtc.store("LeadR", AverageLeadResistance);
+                    myDeepSleepHandler.enableTimerWakeup(2000000);
+                    myDeepSleepHandler.enterDeepSleep();
+                }
             }
         }
 #endif
@@ -199,6 +210,7 @@ void Tester::handleWaitingState() {
         // Check if enough time has passed since last special test exit
         if (lastSpecialTestExit == 0 || (millis() - lastSpecialTestExit) > WIRE_TEST_DELAY) {
             UpdateThresholdsWithLeadResistance(0.0);
+
             currentState = WireTesting_1;
             noWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
             timeToSwitch = WIRE_TEST_1_TIMEOUT;
