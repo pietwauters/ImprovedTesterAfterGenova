@@ -1,10 +1,9 @@
-#include "adc_calibrator.h"
-
 #include <Arduino.h>
 #include <driver/uart.h>
 #include <math.h>
 #include <string.h>
 
+#include "adc_calibrator.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_vfs_dev.h"
@@ -130,20 +129,21 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
     // Solve empirical model: V_diff_measured = V_gpio * R / (R + R1_R2 + Correction/R)
     // This is a quadratic equation in R. Rearranging:
     // V_diff_measured * (R + R1_R2 + Correction/R) = V_gpio * R
-    // Multiply by R: V_diff_measured * R² + V_diff_measured * R1_R2 * R + V_diff_measured * Correction = V_gpio * R²
-    // Rearrange: (V_diff_measured - V_gpio) * R² + V_diff_measured * R1_R2 * R + V_diff_measured * Correction = 0
+    // V_diff_measured * R + V_diff_measured * R1_R2 + V_diff_measured * Correction/R = V_gpio * R
+    // V_diff_measured * R1_R2 + V_diff_measured * Correction/R = R * (V_gpio - V_diff_measured)
+    // Multiply by R: V_diff_measured * R1_R2 * R + V_diff_measured * Correction = R^2 * (V_gpio - V_diff_measured)
+    // Rearrange: R^2 * (V_gpio - V_diff_measured) - V_diff_measured * R1_R2 * R - V_diff_measured * Correction = 0
     // Standard form: a*R^2 + b*R + c = 0
 
-    float a = v_diff_measured - v_gpio;  // This is negative since v_diff < v_gpio
-    float b = v_diff_measured * r1_r2;
-    float c = v_diff_measured * correction;
+    float a = v_gpio - v_diff_measured;
+    float b = -v_diff_measured * r1_r2;
+    float c = -v_diff_measured * correction;
 
     if (fabs(a) < 1e-9) {
         return -1.0f;  // Degenerate case
     }
 
     // Quadratic formula: R = (-b ± sqrt(b^2 - 4ac)) / (2a)
-    // Note: a = (v_diff - v_gpio) is always negative since v_diff < v_gpio
     float discriminant = b * b - 4 * a * c;
     if (discriminant < 0) {
         return -1.0f;  // No real solution
@@ -154,10 +154,8 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
     float r2 = (-b - sqrt_discriminant) / (2 * a);
 
     // Choose the positive solution
-    // Since a < 0, when dividing by 2a, signs flip
-    // We want the physically meaningful positive root (typically the larger one)
     if (r1 > 0 && r2 > 0) {
-        return fmaxf(r1, r2);  // Choose LARGER positive root (since a is negative)
+        return fminf(r1, r2);  // Choose smaller positive root
     } else if (r1 > 0) {
         return r1;
     } else if (r2 > 0) {
@@ -284,25 +282,23 @@ float EmpiricalResistorCalibrator::optimize_slope_weighted(float* R_values, floa
     float best_r1_r2 = 100.0f;
     float best_error = 1e10f;
 
-    // Sweep R1_R2 from 70 to 200 ohms
-    for (float r1_r2_test = 70.0f; r1_r2_test <= 200.0f; r1_r2_test += 1.0f) {
+    // Sweep R1_R2 from 50 to 200 ohms
+    for (float r1_r2_test = 70.0f; r1_r2_test <= 180.0f; r1_r2_test += 0.5f) {
         float weighted_error = 0.0f;
         float total_weight = 0.0f;
 
         for (int i = 0; i < num_points; i++) {
-            // Calculate predicted voltage with correction = 0 for slope optimization
-            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_test, 0.0f);
+            // Calculate predicted voltage with small correction estimate for slope optimization
+            float correction_estimate = 20.0f;  // Use  typical correction value instead of 0
+            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_test, correction_estimate);
 
             // Calculate voltage error
             float voltage_error = V_predicted - V_diff_values[i];
 
-            // Weight by 1/R to emphasize relative accuracy (smaller R = higher weight)
-            // This makes voltage errors on low resistances count more
-            // float weight = 1.0f / (R_values[i] + 1.0f);  // +1 to avoid division by zero
+            // For slope optimization, emphasize higher resistance values which are more stable
+            // and less affected by measurement noise and correction term
+            float weight = (R_values[i] >= 1.0f) ? R_values[i] : 1.0f;  // Higher R = higher weight for slope
 
-            // Weight by R to emphasize relative accuracy (smaller R = higher weight)
-            // This makes voltage errors on low resistances count more
-            float weight = (R_values[i]);  //
             weighted_error += weight * voltage_error * voltage_error;
             total_weight += weight;
         }
@@ -326,7 +322,7 @@ float EmpiricalResistorCalibrator::optimize_correction_sweep(float* R_values, fl
     float best_error = 1e10f;
 
     // Sweep correction from 0 to 150
-    for (float correction_test = -100.0f; correction_test <= 150.0f; correction_test += 1.0f) {
+    for (float correction_test = -50.0f; correction_test <= 50.0f; correction_test += 0.5f) {
         float weighted_error = 0.0f;
         float total_weight = 0.0f;
 
@@ -432,10 +428,10 @@ void EmpiricalResistorCalibrator::interactive_parameter_tuning(float* R_values, 
             printf("Enter new Correction value (current=%.1f): ", this->correction);
             fflush(stdout);
             float new_correction = read_float_from_uart();
-            // if (new_correction >= 0) {
-            this->correction = new_correction;
-            printf("Correction updated to %.1f Ω²\n", this->correction);
-            //}
+            if (new_correction >= 0) {
+                this->correction = new_correction;
+                printf("Correction updated to %.1f Ω²\n", this->correction);
+            }
         } else if (cmd == 's' || cmd == 'S') {
             show_calibration_quality(R_values, V_diff_values, num_points);
         }

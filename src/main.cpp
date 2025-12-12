@@ -74,6 +74,22 @@ int CalibrationDisplayChannel = 0;   // Default to channel 0
 bool CalibrationAutoMode = false;    // Auto mode flag
 int Brightness = BRIGHTNESS_NORMAL;  // Default brightness level
 
+// Bodycord thresholds
+float BodycordThreshold = 1.0;
+
+// Foil thresholds
+float FoilSingleWireThreshold = 1.0;
+float FoilLoopThreshold = 2.0;
+float FoilMassProbeThreshold = 5.0;
+
+// Epee thresholds
+float EpeeSingleWireThreshold = 1.0;
+float EpeeLoopThreshold = 2.0;
+float EpeeMassProbeThreshold = 5.0;
+
+// Lamé thresholds
+float LameThreshold = 1.0;
+
 AsyncWebServer server(80);
 SettingsManager settings;
 WebTerminal terminal(server);
@@ -320,6 +336,32 @@ void LoadSettings() {
     if (Brightness < 1) {
         Brightness = BRIGHTNESS_NORMAL;
     }
+
+    settings.addSection("Advanced", "Advanced Settings", 1, true, true);
+    settings.addSubsection("WireThresholds", "Thresholds for body cord", "Advanced", 1, true, true);
+    settings.addSubsection("FoilThresholds", "Thresholds for foil", "Advanced", 2, true, true);
+    settings.addSubsection("EpeeThresholds", "Thresholds for epee", "Advanced", 3, true, true);
+    settings.addSubsection("LameThresholds", "Thresholds for lamé", "Advanced", 4, true, true);
+    settings.setSectionDescription("Advanced",
+                                   "This section lets you modify default threshold that are used in color coding. "
+                                   "Only change the defaults if you know what you are doing!");
+    // Bodycord thresholds
+    settings.addFloat("BodycordThreshold", "Single wire threshold", &BodycordThreshold, "WireThresholds");
+
+    // Foil thresholds
+    settings.addFloat("FoilSingleWireThreshold", "Single wire threshold (connector - tip)", &FoilSingleWireThreshold,
+                      "FoilThresholds");
+    settings.addFloat("FoilLoopThreshold", "Connector-connector threshold", &FoilLoopThreshold, "FoilThresholds");
+    settings.addFloat("FoilMassProbeThreshold", "Mass pobe threshold", &FoilMassProbeThreshold, "FoilThresholds");
+
+    // Epee thresholds
+    settings.addFloat("EpeeSingleWireThreshold", "Single wire threshold (connector - tip)", &EpeeSingleWireThreshold,
+                      "EpeeThresholds");
+    settings.addFloat("EpeeLoopThreshold", "Connector-connector threshold", &EpeeLoopThreshold, "EpeeThresholds");
+    settings.addFloat("EpeeMassProbeThreshold", "Mass pobe threshold", &EpeeMassProbeThreshold, "EpeeThresholds");
+
+    // Lame thresholds
+    settings.addFloat("LameThreshold", "Lamé threshold", &LameThreshold, "LameThresholds");
 }
 
 void SetupNetworkStuff() {
@@ -420,7 +462,7 @@ void setup() {
     tester->setIgnoreCalibrationWarning(IgnoreCalibrationWarning);
 
     // Start the tester task
-    tester->begin();
+    tester->begin(CalibrationEnabled);
 
     // Remove the idle task from the WDT (do this for both cores)
     esp_task_wdt_delete(xTaskGetIdleTaskHandleForCPU(0));

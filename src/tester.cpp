@@ -34,10 +34,10 @@ void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
     Ohm_50 = mycalibrator.get_adc_threshold_for_resistance_with_leads(50.0, RLead);
 }
 
-void Tester::begin() {
+void Tester::begin(bool ForceCalibration) {
     mycalibrator.begin(br_analog, bl_analog);
     // Try to load existing calibration
-    if (!mycalibrator.load_calibration_from_nvs()) {
+    if ((ForceCalibration) || !mycalibrator.load_calibration_from_nvs()) {
         // No existing calibration, run interactive calibration
         mycalibrator.DoFactoryReset();
         DefaultBlinkColor = LedPanel->m_Red;

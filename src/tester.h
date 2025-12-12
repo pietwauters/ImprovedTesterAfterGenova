@@ -92,7 +92,7 @@ class Tester {
     ~Tester();
 
     // Public methods
-    void begin();
+    void begin(bool ForceCalibration = false);
     void stop();
     void setIgnoreCalibrationWarning(bool value) { IgnoreCalibrationWarning = value; };
     State_t getState() const;
