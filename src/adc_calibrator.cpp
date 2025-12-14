@@ -118,7 +118,7 @@ EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::read_
     return result;
 }
 
-float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measured) {
+float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measured) const {
     if (v_gpio <= 0 || r1_r2 <= 0) {
         return -1.0f;  // Not calibrated
     }

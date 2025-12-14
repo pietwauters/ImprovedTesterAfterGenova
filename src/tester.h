@@ -3,9 +3,11 @@
 #include <Arduino.h>
 
 #include "DeepSleepHandler.h"
+#include "MeasurementCapture.h"
 #include "RTCMemoryStorage.h"
 #include "WS2812BLedMatrix.h"
 #include "WiFiPowerManager.h"
+#include "WireMeasurement.h"
 #include "adc_calibrator.h"
 #include "esp_task_wdt.h"
 #include "resitancemeasurement.h"
@@ -56,6 +58,10 @@ class Tester {
     bool ReelMode = false;
     RTCMemoryStorage rtc;
     EmpiricalResistorCalibrator mycalibrator;
+
+    // New measurement API
+    MeasurementCapture Capture_;
+    MeasurementSet currentMeasurements_;
     float leadresistances[3] = {0.0, 0.0, 0.0};
     float AverageLeadResistance = 0.0;
     bool IgnoreCalibrationWarning = false;

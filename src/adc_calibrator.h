@@ -19,7 +19,7 @@ class EmpiricalResistorCalibrator {
     bool calibrate_interactively_empirical();
 
     // Get resistance from differential measurement using empirical model
-    float get_resistance_empirical(float v_diff_measured);
+    float get_resistance_empirical(float v_diff_measured) const;
 
     // Get ADC raw threshold for a resistance threshold, compensating for test lead resistance
     uint32_t get_adc_threshold_for_resistance_with_leads(float resistance_threshold, float lead_resistance = 0.0f);

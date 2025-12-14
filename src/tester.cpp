@@ -77,6 +77,16 @@ void Tester::begin(bool ForceCalibration) {
     } else {
         StartForLowPower = 0;
     }
+    /*
+    long starttime = millis();
+    for (int i = 0; i < 100; i++) {
+        testWiresOnByOne();
+        esp_task_wdt_reset();
+    }
+    long Duration = millis() - starttime;
+    printf("Total duration = %d\n", Duration);
+    printf("Time for a single sample = %d µs\n", Duration * 10 / 9);
+*/
     // Create the tester task
     xTaskCreatePinnedToCore(testerTaskWrapper, "TesterTask",
                             8192,  // Stack size
@@ -104,11 +114,6 @@ void Tester::taskLoop() {
     esp_task_wdt_add(NULL);
 
     while (true) {
-        /*if (DoCalibration) {
-            ledPanel->ClearAll();
-            Calibrate();
-        }*/
-
         esp_task_wdt_reset();
 
         switch (currentState) {
@@ -136,8 +141,10 @@ void Tester::taskLoop() {
 }
 
 void Tester::handleWaitingState() {
-    // Always update measurements first
-    testWiresOnByOne();
+    // Capture measurements once
+    testWiresOnByOne();  // Legacy API captures to global measurements[][]
+    Capture_.populateFromLegacyArray(currentMeasurements_, measurements);  // Populate new API from same data
+
     if (ReelMode) {
         if (ShowingShape != SHAPE_R) {
             LedPanel->ClearAll();
@@ -146,7 +153,7 @@ void Tester::handleWaitingState() {
             ShowingShape = SHAPE_R;
         }
         esp_task_wdt_reset();
-        if (testAlBl() < Ohm_50) {
+        if (currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
             currentState = Waiting;
             ShowingShape = SHAPE_NONE;
             LedPanel->ClearAll();
@@ -173,32 +180,34 @@ void Tester::handleWaitingState() {
 #endif
         // Check for special test modes
 
-        if (testArCr() < Ohm_20) {
+        if (currentMeasurements_.get(Terminal::Ar, Terminal::Cr) < Ohm_20) {
             currentState = EpeeTesting;
             UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
             doEpeeTest();
             doCommonReturnFromSpecialMode();
             lastSpecialTestExit = millis();
-        } else if (testArBr() < Ohm_20) {
+        } else if (currentMeasurements_.get(Terminal::Ar, Terminal::Br) < Ohm_20) {
             ledPanel->ClearAll();
             UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
             doFoilTest();
 
             doCommonReturnFromSpecialMode();
             lastSpecialTestExit = millis();
-        } else if (testBrCr() < Ohm_20) {
+        } else if (currentMeasurements_.get(Terminal::Br, Terminal::Cr) < Ohm_20) {
             UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
             doLameTest();
 
             doCommonReturnFromSpecialMode();
             lastSpecialTestExit = millis();
-        } else if ((testCrCl() < Ohm_20) && (measurements[1][1] > 160) && (measurements[2][2] > 160)) {
+        } else if ((currentMeasurements_.get(Terminal::Cr, Terminal::Cl) < Ohm_20) &&
+                   (currentMeasurements_.get(Terminal::Ar, Terminal::Al) > 160) &&
+                   (currentMeasurements_.get(Terminal::Br, Terminal::Bl) > 160)) {
             UpdateThresholdsWithLeadResistance(AverageLeadResistance);
             doLameTest_Top();
 
             doCommonReturnFromSpecialMode();
             lastSpecialTestExit = millis();
-        } else if (testAlBl() < Ohm_50) {
+        } else if (currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
             UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
             doReelTest();
         }
@@ -223,7 +232,11 @@ void Tester::handleWaitingState() {
 }
 
 void Tester::handleWireTestingState1() {
-    testWiresOnByOne();
+    testWiresOnByOne();  // Legacy API captures to global measurements[][]
+    Capture_.populateFromLegacyArray(currentMeasurements_, measurements);  // Populate new API from same data
+
+    int brBlValue = currentMeasurements_.get(Terminal::Br, Terminal::Bl);
+    printf("Rcc = %.1f\n", mycalibrator.get_resistance_empirical(brBlValue / 1000.0));
     allGood = doQuickCheck();
 
     if (allGood) {
@@ -255,8 +268,14 @@ void Tester::handleWireTestingState1() {
 
         if (testStraightOnly(myRefs_Ohm[1])) {
             AverageLeadResistance = 0.0;
+
+            Terminal straightTerminals[3] = {Terminal::Cr, Terminal::Ar, Terminal::Br};
+
             for (int i = 0; i < 3; i++) {
-                leadresistances[i] = mycalibrator.get_resistance_empirical(measurements[i][i] / 1000.0);
+                Terminal term = straightTerminals[i];
+                int measurementValue = currentMeasurements_.get(term, term);
+                leadresistances[i] = mycalibrator.get_resistance_empirical(measurementValue / 1000.0);
+
                 AverageLeadResistance += leadresistances[i];
                 printf("Resistance lead[%d] = %.2f Ohm\n", i, leadresistances[i]);
                 fflush(stdout);                 // Force flush
@@ -282,6 +301,7 @@ void Tester::handleWireTestingState1() {
 // So I'm using a relatively high and fixed value
 void Tester::handleWireTestingState2() {
     testWiresOnByOne();
+    Capture_.populateFromLegacyArray(currentMeasurements_, measurements);
     while (WirePluggedIn(ReferenceBroken)) {
         for (int i = 100000; i > 0; i--) {
             esp_task_wdt_reset();
@@ -433,6 +453,8 @@ void Tester::doEpeeTest() {
         // No shorts -> Show E, ArCl > 600 means, no contact between tip and probe so measuring return wire
         if ((arBr > 1500 && brCr > 1500) && arCl > 600) {
             // Show color based on ArCr
+
+            printf("Rac = %.1f\n", mycalibrator.get_resistance_empirical(arCr / 1000.0));
             if (arCr < myRefs_Ohm[2]) {
                 tempColor = LedPanel->m_Green;
                 // LedPanel->SetInner9(LedPanel->m_Green);
