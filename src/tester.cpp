@@ -136,14 +136,13 @@ void Tester::taskLoop() {
         }
 
         esp_task_wdt_reset();
-        vTaskDelay(10 / portTICK_PERIOD_MS);  // Small delay to prevent watchdog issues
+        vTaskDelay(5 / portTICK_PERIOD_MS);  // Small delay to prevent watchdog issues
     }
 }
 
 void Tester::handleWaitingState() {
-    // Capture measurements once
-    testWiresOnByOne();  // Legacy API captures to global measurements[][]
-    Capture_.populateFromLegacyArray(currentMeasurements_, measurements);  // Populate new API from same data
+    // Capture all 15 measurements once at the beginning
+    Capture_.captureAll(currentMeasurements_);
 
     if (ReelMode) {
         if (ShowingShape != SHAPE_R) {
@@ -153,7 +152,7 @@ void Tester::handleWaitingState() {
             ShowingShape = SHAPE_R;
         }
         esp_task_wdt_reset();
-        if (currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
+        if (currentMeasurements_.get(Terminal::Al, Terminal::Cl) < Ohm_50) {
             currentState = Waiting;
             ShowingShape = SHAPE_NONE;
             LedPanel->ClearAll();
@@ -215,7 +214,9 @@ void Tester::handleWaitingState() {
         esp_task_wdt_reset();
     }
     // Check for wire testing mode with delay after special tests
-    if (WirePluggedIn(ReferenceBroken)) {
+    // Capture 3x3 matrix for wire detection (only right vs left, not right-to-right or left-to-left)
+    Capture_.captureMatrix3x3(currentMeasurements_);
+    if (MeasurementAnalysis::isWirePluggedIn(currentMeasurements_, ReferenceBroken)) {
         // Check if enough time has passed since last special test exit
         if (lastSpecialTestExit == 0 || (millis() - lastSpecialTestExit) > WIRE_TEST_DELAY) {
             UpdateThresholdsWithLeadResistance(0.0);
@@ -232,8 +233,7 @@ void Tester::handleWaitingState() {
 }
 
 void Tester::handleWireTestingState1() {
-    testWiresOnByOne();  // Legacy API captures to global measurements[][]
-    Capture_.populateFromLegacyArray(currentMeasurements_, measurements);  // Populate new API from same data
+    Capture_.captureMatrix3x3(currentMeasurements_);
 
     int brBlValue = currentMeasurements_.get(Terminal::Br, Terminal::Bl);
     printf("Rcc = %.1f\n", mycalibrator.get_resistance_empirical(brBlValue / 1000.0));
@@ -243,7 +243,7 @@ void Tester::handleWireTestingState1() {
         timeToSwitch--;
     } else {
         timeToSwitch = WIRE_TEST_1_TIMEOUT;
-        if (!WirePluggedIn(ReferenceBroken)) {
+        if (!MeasurementAnalysis::isWirePluggedIn(currentMeasurements_, ReferenceBroken)) {
             noWireTimeout--;
         } else {
             noWireTimeout = NO_WIRES_PLUGGED_IN_TIMEOUT;
@@ -266,14 +266,19 @@ void Tester::handleWireTestingState1() {
 
         // This is the time to update the threasholds with the lead resistance
 
-        if (testStraightOnly(myRefs_Ohm[1])) {
+        Capture_.captureStraightOnly(currentMeasurements_);
+        if (currentMeasurements_.get(Terminal::Cr, Terminal::Cl) < myRefs_Ohm[1] &&
+            currentMeasurements_.get(Terminal::Ar, Terminal::Al) < myRefs_Ohm[1] &&
+            currentMeasurements_.get(Terminal::Br, Terminal::Bl) < myRefs_Ohm[1]) {
             AverageLeadResistance = 0.0;
 
             Terminal straightTerminals[3] = {Terminal::Cr, Terminal::Ar, Terminal::Br};
+            Terminal leftTerminals[3] = {Terminal::Cl, Terminal::Al, Terminal::Bl};
 
             for (int i = 0; i < 3; i++) {
-                Terminal term = straightTerminals[i];
-                int measurementValue = currentMeasurements_.get(term, term);
+                Terminal rightTerm = straightTerminals[i];
+                Terminal leftTerm = leftTerminals[i];
+                int measurementValue = currentMeasurements_.get(rightTerm, leftTerm);
                 leadresistances[i] = mycalibrator.get_resistance_empirical(measurementValue / 1000.0);
 
                 AverageLeadResistance += leadresistances[i];
@@ -300,30 +305,39 @@ void Tester::handleWireTestingState1() {
 // Wiretesting2 is only looking for breaks. Resistances have been checked in phase 1
 // So I'm using a relatively high and fixed value
 void Tester::handleWireTestingState2() {
-    testWiresOnByOne();
-    Capture_.populateFromLegacyArray(currentMeasurements_, measurements);
-    while (WirePluggedIn(ReferenceBroken)) {
+    // Initial capture to check if wires are still plugged in
+    Capture_.captureStraightOnly(currentMeasurements_);
+
+    while (MeasurementAnalysis::isWirePluggedIn(currentMeasurements_, ReferenceBroken)) {
+        // Tight loop: capture AND test on every iteration, but keep them separate
         for (int i = 100000; i > 0; i--) {
             esp_task_wdt_reset();
-            if (!testStraightOnly(ReferenceBroken)) {
-                i = 0;
+
+            // Step 1: Test the captured data (pure logic)
+            if (currentMeasurements_.get(Terminal::Cr, Terminal::Cl) >= ReferenceBroken ||
+                currentMeasurements_.get(Terminal::Ar, Terminal::Al) >= ReferenceBroken ||
+                currentMeasurements_.get(Terminal::Br, Terminal::Bl) >= ReferenceBroken) {
+                break;
             }
+            // Step 2: Capture (separate function call) This has to be here to make sure we exit immediately if one of
+            // the wires is set to red
+            Capture_.captureStraightOnly(currentMeasurements_);
         }
 
         ledPanel->ClearAll();
         ledPanel->myShow();
 
-        for (int i = 0; i < 3; i++) {
-            allGood &= animateSingleWire(i);
-        }
+        allGood &= animateSingleWire(currentMeasurements_, Terminal::Cr);
+        allGood &= animateSingleWire(currentMeasurements_, Terminal::Ar);
+        allGood &= animateSingleWire(currentMeasurements_, Terminal::Br);
 
         esp_task_wdt_reset();
         vTaskDelay(1500 / portTICK_PERIOD_MS);
         esp_task_wdt_reset();
         ledPanel->ClearAll();
         ledPanel->myShow();
+        Capture_.captureMatrix3x3(currentMeasurements_);
         doQuickCheck(false);  // check one more time (just to keep the correct colors)
-        testWiresOnByOne();
     }
     timeToSwitch = WIRE_TEST_1_TIMEOUT;
     ledPanel->ClearAll();
@@ -760,50 +774,85 @@ void Tester::SetWiretestMode(bool Reelmode) {
     }
 }
 
-bool Tester::animateSingleWire(int wireIndex, bool ReelMode) {
-    // Your existing AnimateSingleWire code
+bool Tester::animateSingleWire(const MeasurementSet& measurements, Terminal terminal) {
+    // Map terminal to LED panel index for animations
+    int wireIndex = (terminal == Terminal::Cr) ? 0 : (terminal == Terminal::Ar) ? 1 : 2;
+
+    // Define the other two terminals for cross-connection checks
+    Terminal otherTerminals[2];
+    if (terminal == Terminal::Cr) {
+        otherTerminals[0] = Terminal::Ar;
+        otherTerminals[1] = Terminal::Br;
+    } else if (terminal == Terminal::Ar) {
+        otherTerminals[0] = Terminal::Br;
+        otherTerminals[1] = Terminal::Cr;
+    } else {  // Terminal::Br
+        otherTerminals[0] = Terminal::Cr;
+        otherTerminals[1] = Terminal::Ar;
+    }
+
+    // Map other terminals to their LED indices
+    int otherIndex1 = (otherTerminals[0] == Terminal::Cr) ? 0 : (otherTerminals[0] == Terminal::Ar) ? 1 : 2;
+    int otherIndex2 = (otherTerminals[1] == Terminal::Cr) ? 0 : (otherTerminals[1] == Terminal::Ar) ? 1 : 2;
+
+    // Get straight-through measurement (right terminal to its corresponding left terminal)
+    Terminal leftTerminal = (terminal == Terminal::Cr)   ? Terminal::Cl
+                            : (terminal == Terminal::Ar) ? Terminal::Al
+                                                         : Terminal::Bl;
+    int straightMeasurement = measurements.get(terminal, leftTerminal);
+
+    // Get cross-connection measurements
+    Terminal leftOther1 = (otherTerminals[0] == Terminal::Cr)   ? Terminal::Cl
+                          : (otherTerminals[0] == Terminal::Ar) ? Terminal::Al
+                                                                : Terminal::Bl;
+    Terminal leftOther2 = (otherTerminals[1] == Terminal::Cr)   ? Terminal::Cl
+                          : (otherTerminals[1] == Terminal::Ar) ? Terminal::Al
+                                                                : Terminal::Bl;
+    int crossMeasurement1 = measurements.get(terminal, leftOther1);
+    int crossMeasurement2 = measurements.get(terminal, leftOther2);
+
     bool bOK = false;
-    if (measurements[wireIndex][wireIndex] < ReferenceBroken) {
-        if ((measurements[wireIndex][(wireIndex + 1) % 3] > 200) &&
-            (measurements[wireIndex][(wireIndex + 2) % 3] > 200)) {
-            // OK
+    if (straightMeasurement < ReferenceBroken) {
+        if ((crossMeasurement1 > 200) && (crossMeasurement2 > 200)) {
+            // OK - good straight connection, no cross-shorts
             int level = 2;
-            if (measurements[wireIndex][wireIndex] <= ReferenceYellow)
+            if (straightMeasurement <= ReferenceYellow)
                 level = 1;
-            if (measurements[wireIndex][wireIndex] <= ReferenceGreen)
+            if (straightMeasurement <= ReferenceGreen)
                 level = 0;
 
             LedPanel->AnimateGoodConnection(wireIndex, level);
             bOK = true;
         } else {
-            // short
-            if (measurements[wireIndex][(wireIndex + 1) % 3] < ReferenceShort)
-                LedPanel->AnimateShort(wireIndex, (wireIndex + 1) % 3);
-            else if (measurements[wireIndex][(wireIndex + 2) % 3] < ReferenceShort)
-                LedPanel->AnimateShort(wireIndex, (wireIndex + 2) % 3);
+            // Short detected
+            if (crossMeasurement1 < ReferenceShort)
+                LedPanel->AnimateShort(wireIndex, otherIndex1);
+            else if (crossMeasurement2 < ReferenceShort)
+                LedPanel->AnimateShort(wireIndex, otherIndex2);
         }
     } else {
-        if ((measurements[wireIndex][(wireIndex + 1) % 3] > ReferenceShort) &&
-            (measurements[wireIndex][(wireIndex + 2) % 3] > ReferenceShort)) {
-            // Simply broken
+        if ((crossMeasurement1 > ReferenceShort) && (crossMeasurement2 > ReferenceShort)) {
+            // Simply broken - high resistance on all connections
             LedPanel->AnimateBrokenConnection(wireIndex);
         } else {
-            if (measurements[wireIndex][(wireIndex + 1) % 3] < ReferenceShort)
-                LedPanel->AnimateWrongConnection(wireIndex, (wireIndex + 1) % 3);
-            if (measurements[wireIndex][(wireIndex + 2) % 3] < ReferenceShort)
-                LedPanel->AnimateWrongConnection(wireIndex, (wireIndex + 2) % 3);
+            // Wrong connection - broken straight but has cross connection
+            if (crossMeasurement1 < ReferenceShort)
+                LedPanel->AnimateWrongConnection(wireIndex, otherIndex1);
+            if (crossMeasurement2 < ReferenceShort)
+                LedPanel->AnimateWrongConnection(wireIndex, otherIndex2);
         }
     }
     return bOK;
 }
 
 bool Tester::doQuickCheck(bool bClearAtTheEnd) {
-    // Your existing DoQuickCheck code
+    // Check all three wire connections using already-captured measurements
     bool bAllGood = true;
-    testWiresOnByOne();
-    for (int i = 0; i < 3; i++) {
-        bAllGood &= animateSingleWire(i);
-    }
+
+    bAllGood &= animateSingleWire(currentMeasurements_, Terminal::Cr);
+    bAllGood &= animateSingleWire(currentMeasurements_, Terminal::Ar);
+    bAllGood &= animateSingleWire(currentMeasurements_, Terminal::Br);
+
     esp_task_wdt_reset();
     vTaskDelay(500 / portTICK_PERIOD_MS);
     esp_task_wdt_reset();

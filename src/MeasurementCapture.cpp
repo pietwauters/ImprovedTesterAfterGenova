@@ -19,6 +19,47 @@ static const uint8_t testsettings[][3][2] = {
 static const adc1_channel_t analogtestsettings[3] = {cl_analog, piste_analog, bl_analog};
 static const adc1_channel_t analogtestsettings_right[3] = {cr_analog, ar_analog, br_analog};
 
+void MeasurementCapture::captureAll(MeasurementSet& result) {
+    result.clear();
+    uint32_t timestamp = millis();
+
+    // Capture all 15 possible measurements between 6 terminals
+    // This includes: 3x3 matrix (right vs left) + 3 right-to-right + 3 left-to-left
+
+    // Right-to-right measurements (3) - used for special test mode detection
+    result.add(Terminal::Ar, Terminal::Br, measureArBr());
+    result.add(Terminal::Ar, Terminal::Cr, measureArCr());
+    result.add(Terminal::Br, Terminal::Cr, measureBrCr());
+
+    // Right-to-left measurements (9) - main 3x3 matrix
+    result.add(Terminal::Ar, Terminal::Cl, measureArCl());
+    MeasurementHardware::Set_IODirectionAndValue(IODirection_ar_piste, IOValues_ar_piste);
+    result.add(Terminal::Ar, Terminal::Al, MeasurementHardware::getDifferentialSample(ar_analog, piste_analog));
+    MeasurementHardware::Set_IODirectionAndValue(IODirection_ar_bl, IOValues_ar_bl);
+    result.add(Terminal::Ar, Terminal::Bl, MeasurementHardware::getDifferentialSample(ar_analog, bl_analog));
+
+    result.add(Terminal::Br, Terminal::Cl, measureBrCl());
+    MeasurementHardware::Set_IODirectionAndValue(IODirection_br_piste, IOValues_br_piste);
+    result.add(Terminal::Br, Terminal::Al, MeasurementHardware::getDifferentialSample(br_analog, piste_analog));
+    MeasurementHardware::Set_IODirectionAndValue(IODirection_br_bl, IOValues_br_bl);
+    result.add(Terminal::Br, Terminal::Bl, MeasurementHardware::getDifferentialSample(br_analog, bl_analog));
+
+    result.add(Terminal::Cr, Terminal::Cl, measureCrCl());
+    MeasurementHardware::Set_IODirectionAndValue(IODirection_cr_piste, IOValues_cr_piste);
+    result.add(Terminal::Cr, Terminal::Al, MeasurementHardware::getDifferentialSample(cr_analog, piste_analog));
+    MeasurementHardware::Set_IODirectionAndValue(IODirection_cr_bl, IOValues_cr_bl);
+    result.add(Terminal::Cr, Terminal::Bl, MeasurementHardware::getDifferentialSample(cr_analog, bl_analog));
+
+    // Left-to-left measurements (3) - including piste measurement
+    result.add(Terminal::Al, Terminal::Bl, measureAlBl());
+    MeasurementHardware::Set_IODirectionAndValue(IODirection_cl_piste, IOValues_cl_piste);
+    result.add(Terminal::Al, Terminal::Cl, MeasurementHardware::getDifferentialSample(piste_analog, cl_analog));
+    MeasurementHardware::Set_IODirectionAndValue(IODirection_bl_cl, IOValues_bl_cl);
+    result.add(Terminal::Bl, Terminal::Cl, MeasurementHardware::getDifferentialSample(bl_analog, cl_analog));
+
+    result.setTimestamp(timestamp);
+}
+
 void MeasurementCapture::captureMatrix3x3(MeasurementSet& result) {
     result.clear();
     uint32_t timestamp = millis();
@@ -74,9 +115,8 @@ void MeasurementCapture::captureMatrix3x3(MeasurementSet& result) {
     result.setTimestamp(timestamp);
 }
 
-bool MeasurementCapture::captureStraightOnly(MeasurementSet& result, int threshold) {
+void MeasurementCapture::captureStraightOnly(MeasurementSet& result) {
     result.clear();
-    bool allOK = true;
     uint32_t timestamp = millis();
 
     // Use high-resolution sampling for straight-through measurements
@@ -87,33 +127,33 @@ bool MeasurementCapture::captureStraightOnly(MeasurementSet& result, int thresho
         int mv = MeasurementHardware::getDifferentialSample(analogtestsettings_right[Nr], analogtestsettings[Nr],
                                                             MAX_NUM_ADC_SAMPLES);
 
-        // Map to Terminal enum
-        Terminal terminal;
+        // Map to Terminal enum - straight through measurements
+        // Nr=0: Cr-Cl, Nr=1: Ar-Al, Nr=2: Br-Bl
+        Terminal rightTerminal, leftTerminal;
         switch (Nr) {
             case 0:
-                terminal = Terminal::Cr;
+                rightTerminal = Terminal::Cr;
+                leftTerminal = Terminal::Cl;
                 break;
             case 1:
-                terminal = Terminal::Ar;
+                rightTerminal = Terminal::Ar;
+                leftTerminal = Terminal::Al;
                 break;
             case 2:
-                terminal = Terminal::Br;
+                rightTerminal = Terminal::Br;
+                leftTerminal = Terminal::Bl;
                 break;
             default:
-                terminal = Terminal::Cr;
+                rightTerminal = Terminal::Cr;
+                leftTerminal = Terminal::Cl;
                 break;
         }
 
-        // Store as terminal to itself (straight through)
-        result.add(terminal, terminal, mv);
-
-        if (mv > threshold) {
-            allOK = false;
-        }
+        // Store straight-through measurement (right to corresponding left)
+        result.add(rightTerminal, leftTerminal, mv);
     }
 
     result.setTimestamp(timestamp);
-    return allOK;
 }
 
 int MeasurementCapture::measureArBr() {
