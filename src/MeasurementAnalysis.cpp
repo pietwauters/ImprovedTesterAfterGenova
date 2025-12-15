@@ -36,6 +36,7 @@ bool MeasurementAnalysis::isWirePluggedInFoil(const MeasurementSet& data, int th
 
 bool MeasurementAnalysis::isWirePluggedInEpee(const MeasurementSet& data, int threshold) {
     // For Epee testing: Only check measurements to Al and Bl (not Cl)
+
     for (uint8_t i = 0; i < data.count(); i++) {
         const auto& m = data[i];
         if (!m.isValid())

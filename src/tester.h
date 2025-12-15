@@ -77,6 +77,7 @@ class Tester {
     void doLameTest();
     void doLameTest_Top();
     void doReelTest();
+    bool DebounceTest(int LowBound, int HighBound);
     bool animateSingleWire(const MeasurementSet& measurements, Terminal terminal);
     void SetWiretestMode(bool Reelmode);
     bool GetWiretestMode() { return ReelMode; };

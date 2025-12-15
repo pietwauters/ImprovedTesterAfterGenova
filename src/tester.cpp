@@ -152,7 +152,7 @@ void Tester::handleWaitingState() {
             ShowingShape = SHAPE_R;
         }
         esp_task_wdt_reset();
-        if (currentMeasurements_.get(Terminal::Al, Terminal::Cl) < Ohm_50) {
+        if (currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
             currentState = Waiting;
             ShowingShape = SHAPE_NONE;
             LedPanel->ClearAll();
@@ -361,15 +361,15 @@ void Tester::doCommonReturnFromSpecialMode() {
     }
 
     ledPanel->ClearAll();
-    testWiresOnByOne();
+    Capture_.captureMatrix3x3(currentMeasurements_);
 }
 
 bool Tester::delayAndTestWirePluggedIn(long delay) {
     long returnTime = millis() + delay;
     while (millis() < returnTime) {
         esp_task_wdt_reset();
-        testWiresOnByOne();
-        if (WirePluggedIn()) {
+        Capture_.captureMatrix3x3(currentMeasurements_);
+        if (MeasurementAnalysis::isWirePluggedIn(currentMeasurements_)) {
             return true;
         }
     }
@@ -380,8 +380,8 @@ bool Tester::delayAndTestWirePluggedInFoil(long delay) {
     long returnTime = millis() + delay;
     while (millis() < returnTime) {
         esp_task_wdt_reset();
-        testWiresOnByOne();
-        if (WirePluggedInFoil()) {
+        Capture_.captureMatrix3x3(currentMeasurements_);
+        if (MeasurementAnalysis::isWirePluggedInFoil(currentMeasurements_)) {
             return true;
         }
     }
@@ -392,8 +392,8 @@ bool Tester::delayAndTestWirePluggedInEpee(long delay) {
     long returnTime = millis() + delay;
     while (millis() < returnTime) {
         esp_task_wdt_reset();
-        testWiresOnByOne();
-        if (WirePluggedInEpee()) {
+        Capture_.captureMatrix3x3(currentMeasurements_);
+        if (MeasurementAnalysis::isWirePluggedInEpee(currentMeasurements_)) {
             return true;
         }
     }
@@ -404,8 +404,8 @@ bool Tester::delayAndTestWirePluggedInLameTestTop(long delay) {
     long returnTime = millis() + delay;
     while (millis() < returnTime) {
         esp_task_wdt_reset();
-        testWiresOnByOne();
-        if (WirePluggedInLameTopTesting()) {
+        Capture_.captureMatrix3x3(currentMeasurements_);
+        if (MeasurementAnalysis::isWirePluggedInLameTop(currentMeasurements_)) {
             return true;
         }
     }
@@ -418,9 +418,14 @@ void Tester::doReelTest() {
     LedPanel->Draw_R(LedPanel->m_Green);
     LedPanel->myShow();
     SetWiretestMode(true);
-    while (!WirePluggedInEpee(ReferenceBroken)) {
+
+    // Initial capture before entering loop
+    Capture_.captureMatrix3x3(currentMeasurements_);
+
+    while (!MeasurementAnalysis::isWirePluggedInEpee(currentMeasurements_, ReferenceBroken)) {
         esp_task_wdt_reset();
-        testWiresOnByOne();
+        // Refresh measurements for next iteration
+        Capture_.captureMatrix3x3(currentMeasurements_);
     }
     ShowingShape = SHAPE_NONE;
     LedPanel->ClearAll();
@@ -429,13 +434,17 @@ void Tester::doReelTest() {
 
 void Tester::doEpeeTest() {
     int BrCl;
+    int arCr, arCl, arBr, brCr;  // Declare all loop variables at function scope
     uint32_t tempColor;
-    testWiresOnByOne();
     ShowingShape = SHAPE_NONE;
     LedPanel->ClearAll();
-    while (!WirePluggedInEpee()) {
+
+    // Initial capture before entering loop
+    Capture_.captureMatrix3x3(currentMeasurements_);
+
+    while (!MeasurementAnalysis::isWirePluggedInEpee(currentMeasurements_)) {
         esp_task_wdt_reset();
-        BrCl = testBrCl();
+        BrCl = Capture_.measureBrCl();
         if (BrCl < 500) {
             // We're in Probe mode
             if (SHAPE_P != ShowingShape) {
@@ -455,20 +464,20 @@ void Tester::doEpeeTest() {
             if (delayAndTestWirePluggedInFoil(100)) {
                 break;
             }
-            continue;
+            goto loop_end;
         }
 
-        int arCr = testArCr();
-        int arCl = testArCl();
-        int arBr = testArBr();
-        int brCr = testBrCr();
+        arCr = Capture_.measureArCr();
+        arCl = Capture_.measureArCl();
+        arBr = Capture_.measureArBr();
+        brCr = Capture_.measureBrCr();
 
         // Case 1: Both ArBr and BrCr > 1500, ArCl > 600
         // No shorts -> Show E, ArCl > 600 means, no contact between tip and probe so measuring return wire
         if ((arBr > 1500 && brCr > 1500) && arCl > 600) {
             // Show color based on ArCr
 
-            printf("Rac = %.1f\n", mycalibrator.get_resistance_empirical(arCr / 1000.0));
+            // printf("Rac = %.1f\n", mycalibrator.get_resistance_empirical(arCr / 1000.0));
             if (arCr < myRefs_Ohm[2]) {
                 tempColor = LedPanel->m_Green;
                 // LedPanel->SetInner9(LedPanel->m_Green);
@@ -485,8 +494,7 @@ void Tester::doEpeeTest() {
                     ShowingShape = SHAPE_E;
                     LedPanel->Draw_E(LedPanel->m_White);
                 }
-                testWiresOnByOne();
-                continue;
+                goto loop_end;
             }
             if (SHAPE_SQUARE != ShowingShape) {
                 LedPanel->ClearAll();
@@ -516,8 +524,7 @@ void Tester::doEpeeTest() {
                     ShowingShape = SHAPE_E;
                     LedPanel->Draw_E(LedPanel->m_White);
                 }
-                testWiresOnByOne();
-                continue;
+                goto loop_end;
             }
             if (SHAPE_SQUARE != ShowingShape) {
                 LedPanel->ClearAll();
@@ -551,20 +558,25 @@ void Tester::doEpeeTest() {
         }
 
         esp_task_wdt_reset();
-        testWiresOnByOne();
+    loop_end:
+        // Refresh measurements for next iteration
+        Capture_.captureMatrix3x3(currentMeasurements_);
     }
     LedPanel->ClearAll();
     LedPanel->myShow();
 }
 
 void Tester::doFoilTest() {
-    testWiresOnByOne();
     int BrCl;
+    int arBr;  // Declare loop variable at function scope
 
-    while (!WirePluggedInFoil()) {
+    // Initial capture before entering loop
+    Capture_.captureMatrix3x3(currentMeasurements_);
+
+    while (!MeasurementAnalysis::isWirePluggedInFoil(currentMeasurements_)) {
         esp_task_wdt_reset();
         LedPanel->myShow();
-        BrCl = testBrCl();
+        BrCl = Capture_.measureBrCl();
         if (BrCl < 500) {
             if (SHAPE_P != ShowingShape) {
                 LedPanel->ClearAll();
@@ -581,36 +593,32 @@ void Tester::doFoilTest() {
             }
             LedPanel->myShow();
             if (delayAndTestWirePluggedInFoil(100)) {
-                Serial.println("Wire plugged in during foil light, breaking out");
                 break;
             }
-            continue;
+            goto loop_end;
         }
 
-        int arBr = testArBr();
+        arBr = Capture_.measureArBr();
         if (SHAPE_F != ShowingShape) {
             LedPanel->ClearAll();
             ShowingShape = SHAPE_F;
         }
         if (arBr < myRefs_Ohm[2]) {
             LedPanel->Draw_F(LedPanel->m_Green);
-            testWiresOnByOne();
-            continue;
+            goto loop_end;
         } else if (arBr < myRefs_Ohm[4]) {
             LedPanel->Draw_F(LedPanel->m_Yellow);
-            testWiresOnByOne();
-            continue;
+            goto loop_end;
         } else if (arBr < 2000) {
             LedPanel->Draw_F(LedPanel->m_Orange);
-            testWiresOnByOne();
-            continue;
+            goto loop_end;
         } else {
-            // Debounce: testArBr() > 1500 must be true for 10ms
+            // Debounce: measureArBr() > 1500 must be true for 10ms
             bool debounced = true;
             unsigned long start = millis();
             while (millis() - start < 10) {
                 esp_task_wdt_reset();
-                if (testArBr() <= 1500) {
+                if (Capture_.measureArBr() <= 1500) {
                     debounced = false;
                     break;
                 }
@@ -618,8 +626,7 @@ void Tester::doFoilTest() {
             }
 
             if (!debounced) {
-                Serial.println("Debouncing failed, continuing loop");
-                continue;
+                goto loop_end;
             }
 
             // Debouncing succeeded: show inner lights based on ArCl
@@ -627,11 +634,11 @@ void Tester::doFoilTest() {
                 LedPanel->ClearAll();
                 ShowingShape = SHAPE_SQUARE;
             }
-            if (testArCl() < myRefs_Ohm[1]) {
+            if (Capture_.measureArCl() < myRefs_Ohm[1]) {
                 LedPanel->SetInner9(LedPanel->m_Green);
-            } else if (testArCl() < myRefs_Ohm[2]) {
+            } else if (Capture_.measureArCl() < myRefs_Ohm[2]) {
                 LedPanel->SetInner9(LedPanel->m_Yellow);
-            } else if (testArCl() < 500) {
+            } else if (Capture_.measureArCl() < 500) {
                 LedPanel->SetInner9(LedPanel->m_Orange);
             } else {
                 LedPanel->SetInner9(LedPanel->m_White);
@@ -639,19 +646,18 @@ void Tester::doFoilTest() {
             LedPanel->myShow();
 
             if (delayAndTestWirePluggedInFoil(1000)) {
-                Serial.println("Wire plugged in during foil light, breaking out");
                 break;
             }
-            if (testArBr() <= 1500) {
+            if (Capture_.measureArBr() <= 1500) {
                 LedPanel->ClearAll();
                 LedPanel->myShow();
             }
         }
-
-        testWiresOnByOne();
+    loop_end:
+        // Refresh measurements for next iteration
+        Capture_.captureMatrix3x3(currentMeasurements_);
     }
 
-    Serial.println("Wire plugged in during foil test, leaving");
     LedPanel->ClearAll();
     LedPanel->myShow();
 }
@@ -659,38 +665,41 @@ void Tester::doFoilTest() {
 void Tester::doLameTest() {
     // Your existing DoLameTest code
     bool bShowingRed = false;
-    testWiresOnByOne();
-    while (!WirePluggedIn()) {
+
+    // Initial capture before entering loop
+    Capture_.captureMatrix3x3(currentMeasurements_);
+
+    while (!MeasurementAnalysis::isWirePluggedIn(currentMeasurements_)) {
         esp_task_wdt_reset();
-        if (testBrCr() < myRefs_Ohm[5]) {
+        if (Capture_.measureBrCr() < myRefs_Ohm[5]) {
             LedPanel->DrawDiamond(LedPanel->m_Green);
             bShowingRed = false;
             // while((testBrCr()<myRefs_Ohm[5])){esp_task_wdt_reset();};
             while (debouncedCondition(
                 [this]() {
-                    int temp = testBrCr();
+                    int temp = Capture_.measureBrCr();
                     return temp < myRefs_Ohm[5];
                 },
                 10));
         } else {
-            if (testBrCr() < myRefs_Ohm[10]) {
+            if (Capture_.measureBrCr() < myRefs_Ohm[10]) {
                 LedPanel->DrawDiamond(LedPanel->m_Yellow);
                 bShowingRed = false;
                 // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
                 while (debouncedCondition(
                     [this]() {
-                        int temp = testBrCr();
+                        int temp = Capture_.measureBrCr();
                         return ((temp < myRefs_Ohm[10]) && (temp >= myRefs_Ohm[5]));
                     },
                     10));
             } else {
-                if (testBrCr() < Ohm_25) {
+                if (Capture_.measureBrCr() < Ohm_25) {
                     LedPanel->DrawDiamond(LedPanel->m_Orange);
                     bShowingRed = false;
                     // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
                     while (debouncedCondition(
                         [this]() {
-                            int temp = testBrCr();
+                            int temp = Capture_.measureBrCr();
                             return ((temp < myRefs_Ohm[25]) && (temp >= myRefs_Ohm[10]));
                         },
                         10));
@@ -705,38 +714,43 @@ void Tester::doLameTest() {
         }
 
         esp_task_wdt_reset();
-        testWiresOnByOne();
+        // Refresh measurements for next iteration
+        Capture_.captureMatrix3x3(currentMeasurements_);
     }
     LedPanel->ClearAll();
     LedPanel->myShow();
 }
 
-bool DebounceTest(int LowBound, int HighBound) {
-    testWiresOnByOne();
-    if (WirePluggedInLameTopTesting()) {
+bool Tester::DebounceTest(int LowBound, int HighBound) {
+    Capture_.captureMatrix3x3(currentMeasurements_);
+    if (MeasurementAnalysis::isWirePluggedInLameTop(currentMeasurements_)) {
         return false;
     }
-    return ((testCrCl() >= LowBound) && (testCrCl() < HighBound));
+    int crCl = currentMeasurements_.get(Terminal::Cr, Terminal::Cl);
+    return ((crCl >= LowBound) && (crCl < HighBound));
 }
 
 void Tester::doLameTest_Top() {
     // Your existing DoLameTest code
     bool bShowingRed = false;
-    testWiresOnByOne();
-    while (!WirePluggedInLameTopTesting()) {
+
+    // Initial capture before entering loop
+    Capture_.captureMatrix3x3(currentMeasurements_);
+
+    while (!MeasurementAnalysis::isWirePluggedInLameTop(currentMeasurements_)) {
         esp_task_wdt_reset();
-        if (testCrCl() < myRefs_Ohm[5]) {
+        if (Capture_.measureCrCl() < myRefs_Ohm[5]) {
             LedPanel->DrawDiamond(LedPanel->m_Green);
             bShowingRed = false;
 
             while (debouncedCondition([this]() { return DebounceTest(0, myRefs_Ohm[5]); }, 10));
         } else {
-            if (testCrCl() < myRefs_Ohm[10]) {
+            if (Capture_.measureCrCl() < myRefs_Ohm[10]) {
                 LedPanel->DrawDiamond(LedPanel->m_Yellow);
                 bShowingRed = false;
                 while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[5], myRefs_Ohm[10]); }, 10));
             } else {
-                if (testCrCl() < Ohm_25) {
+                if (Capture_.measureCrCl() < Ohm_25) {
                     LedPanel->DrawDiamond(LedPanel->m_Orange);
                     bShowingRed = false;
                     // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
@@ -751,7 +765,8 @@ void Tester::doLameTest_Top() {
         }
 
         esp_task_wdt_reset();
-        testWiresOnByOne();
+        // Refresh measurements for next iteration
+        Capture_.captureMatrix3x3(currentMeasurements_);
     }
     LedPanel->ClearAll();
     LedPanel->myShow();
