@@ -106,7 +106,7 @@ class WS2812B_LedMatrix {
     Adafruit_NeoPixel* m_pixels;
     uint8_t m_Brightness = BRIGHTNESS_NORMAL;
     bool m_Loudness = true;
-    int animationspeed = 100;
+    int animationspeed = 60;
     QueueHandle_t queue = NULL;
     int m_BlinkingPixel = -1;  // -1 means no blinking
     uint32_t m_BlinkingColor = 0;

@@ -44,6 +44,9 @@ using namespace std;
 #include "soc/io_mux_reg.h"  // For IO_MUX register definitions
 #include "tester.h"
 
+/*#include "ESP32Button.h"
+ */
+
 void disableRadioForTesting() {
     Serial.println("=== TEMPORARILY DISABLING RADIO FOR TESTING ===");
 
@@ -181,6 +184,7 @@ void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
 void synchronizeThresholdValues() {}
 
 // This function should become part of the calibrationmodule
+/*
 void AdjustThreasholdForRealV() {
     static bool bInitialAdjustmentDone = false;
     static long TimeToTest = 0;
@@ -220,7 +224,7 @@ void AdjustThreasholdForRealV() {
         TimeToTest = millis() + 1000;
     }
 }
-
+*/
 bool CalibrationEnabled;
 
 String deviceName;

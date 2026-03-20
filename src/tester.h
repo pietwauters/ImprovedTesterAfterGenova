@@ -1,6 +1,10 @@
 #pragma once
 
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <Arduino.h>
+#include <Fonts/FreeMono9pt7b.h>
+#include <Wire.h>
 
 #include "DeepSleepHandler.h"
 #include "MeasurementCapture.h"
@@ -22,6 +26,7 @@ constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT = 2;
 constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT_REEL = 7;
 constexpr int FOIL_TEST_TIMEOUT = 1000;
 constexpr int WIRE_TEST_DELAY = 2000;  // 2 seconds delay after special test exit
+constexpr int LOOP_DELAY_IN_WIRETESTING1 = 400;
 
 class Tester {
    private:
@@ -71,6 +76,7 @@ class Tester {
     bool delayAndTestWirePluggedIn(long delay);
     bool delayAndTestWirePluggedInFoil(long delay);
     bool delayAndTestWirePluggedInEpee(long delay);
+    bool delayAndTestWirePluggedInEpeeAndShowConnectionValue(long delay, Terminal Tfrom, Terminal Tto);
     bool delayAndTestWirePluggedInLameTestTop(long delay);
     void doEpeeTest();
     void doFoilTest();

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "WS2812BLedMatrix.h"
 // External variables that need to be shared
 extern bool DoCalibration;
 extern bool LowPowerMode;
