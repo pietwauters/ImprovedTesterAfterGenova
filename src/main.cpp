@@ -34,6 +34,7 @@ using namespace std;
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include "DisplayManager.h"
 #include "GpioHoldManager.h"
 #include "RTOSUtilities.h"
 #include "USBSerialTerminal.h"
@@ -434,11 +435,16 @@ void setup() {
     // put your setup code here, to run once:
     setCpuFrequencyMhz(240);  // Set CPU frequency to 240 MHz
     Serial.begin(115200);
-
-    // Set global log level to ERROR only - suppress INFO logs from libraries
     esp_log_level_set("*", ESP_LOG_ERROR);
 
     LoadSettings();
+    Display.begin();
+
+    Display.print(deviceName);
+    Display.printf("\n\n%s", APP_VERSION);
+    Display.display();  // flush framebuffer to screen    // Set global log level to ERROR only - suppress INFO logs
+                        // from libraries
+
     LedPanel = new WS2812B_LedMatrix();
     LedPanel->setMirrorMode(MirrorMode);
     LedPanel->begin();

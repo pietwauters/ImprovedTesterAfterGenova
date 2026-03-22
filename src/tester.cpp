@@ -239,11 +239,16 @@ void Tester::handleWaitingState() {
 
 void Tester::handleWireTestingState1() {
     Display.setMode("Wiretest1");
-    Display.showMode();
+    Display.showWiretesting1();
     Capture_.captureMatrix3x3(currentMeasurements_);
 
     int brBlValue = currentMeasurements_.get(Terminal::Br, Terminal::Bl);
-    printf("Rcc = %.1f\n", mycalibrator.get_resistance_empirical(brBlValue / 1000.0));
+    int crCLValue = currentMeasurements_.get(Terminal::Cr, Terminal::Cl);
+    int arALValue = currentMeasurements_.get(Terminal::Ar, Terminal::Al);
+    // printf("Rbb = %.1f\n", mycalibrator.get_resistance_empirical(brBlValue / 1000.0));
+    Display.showWiretesting1Values(mycalibrator.get_resistance_empirical(crCLValue / 1000.0),
+                                   mycalibrator.get_resistance_empirical(arALValue / 1000.0),
+                                   mycalibrator.get_resistance_empirical(brBlValue / 1000.0));
     allGood = doQuickCheck();
 
     if (allGood) {
@@ -258,6 +263,8 @@ void Tester::handleWireTestingState1() {
         if (!noWireTimeout) {
             currentState = Waiting;
             ShowingShape = SHAPE_NONE;
+            Display.setMode("Waiting");
+            Display.showMode();
             // SetWiretestMode(false);
         }
     }
@@ -313,19 +320,37 @@ void Tester::handleWireTestingState1() {
 // So I'm using a relatively high and fixed value
 void Tester::handleWireTestingState2() {
     Display.setMode("Wiretest2");
-    Display.showMode();
-    // Initial capture to check if wires are still plugged in
+    Display.showWiretesting1();
+    // Display.showMode();
+    //  Initial capture to check if wires are still plugged in
     Capture_.captureStraightOnly(currentMeasurements_);
+    int brBlValue = currentMeasurements_.get(Terminal::Br, Terminal::Bl);
+    int crCLValue = currentMeasurements_.get(Terminal::Cr, Terminal::Cl);
+    int arALValue = currentMeasurements_.get(Terminal::Ar, Terminal::Al);
+    int AvAA = 0;
+    int AvBB = 0;
+    int AvCC = 0;
 
     while (MeasurementAnalysis::isWirePluggedIn(currentMeasurements_, ReferenceBroken)) {
         // Tight loop: capture AND test on every iteration, but keep them separate
         for (int i = 100000; i > 0; i--) {
             esp_task_wdt_reset();
-
+            brBlValue = currentMeasurements_.get(Terminal::Br, Terminal::Bl);
+            crCLValue = currentMeasurements_.get(Terminal::Cr, Terminal::Cl);
+            arALValue = currentMeasurements_.get(Terminal::Ar, Terminal::Al);
+            AvAA += arALValue;
+            AvBB += brBlValue;
+            AvCC += crCLValue;
+            if (!(i % 10)) {
+                Display.showWiretesting1Values(mycalibrator.get_resistance_empirical(AvCC / 10000.0),
+                                               mycalibrator.get_resistance_empirical(AvAA / 10000.0),
+                                               mycalibrator.get_resistance_empirical(AvBB / 10000.0));
+                AvAA = 0;
+                AvBB = 0;
+                AvCC = 0;
+            }
             // Step 1: Test the captured data (pure logic)
-            if (currentMeasurements_.get(Terminal::Cr, Terminal::Cl) >= ReferenceBroken ||
-                currentMeasurements_.get(Terminal::Ar, Terminal::Al) >= ReferenceBroken ||
-                currentMeasurements_.get(Terminal::Br, Terminal::Bl) >= ReferenceBroken) {
+            if (crCLValue >= ReferenceBroken || arALValue >= ReferenceBroken || brBlValue >= ReferenceBroken) {
                 break;
             }
             // Step 2: Capture (separate function call) This has to be here to make sure we exit immediately if one of
@@ -335,6 +360,12 @@ void Tester::handleWireTestingState2() {
 
         ledPanel->ClearAll();
         ledPanel->myShow();
+        brBlValue = currentMeasurements_.get(Terminal::Br, Terminal::Bl);
+        crCLValue = currentMeasurements_.get(Terminal::Cr, Terminal::Cl);
+        arALValue = currentMeasurements_.get(Terminal::Ar, Terminal::Al);
+        Display.showWiretesting1Values(mycalibrator.get_resistance_empirical(crCLValue / 1000.0),
+                                       mycalibrator.get_resistance_empirical(arALValue / 1000.0),
+                                       mycalibrator.get_resistance_empirical(brBlValue / 1000.0));
 
         allGood &= animateSingleWire(currentMeasurements_, Terminal::Cr);
         allGood &= animateSingleWire(currentMeasurements_, Terminal::Ar);
@@ -354,6 +385,8 @@ void Tester::handleWireTestingState2() {
     ShowingShape = SHAPE_NONE;
     currentState = Waiting;
     SetWiretestMode(false);
+    Display.setMode("Waiting");
+    Display.showMode();
 }
 
 void Tester::doCommonReturnFromSpecialMode() {
@@ -514,9 +547,10 @@ void Tester::doEpeeTest() {
             LedPanel->myShow();
             float r = mycalibrator.get_resistance_empirical(BrCl / 1000.0);
             Display.showSingleValue(r);
-            if (delayAndTestWirePluggedInFoil(100)) {
+            /*if (delayAndTestWirePluggedInFoil(100)) {
                 break;
-            }
+            }*/
+            vTaskDelay(100 / portTICK_PERIOD_MS);
             goto loop_end;
         }
 
@@ -666,9 +700,10 @@ void Tester::doFoilTest() {
             r = mycalibrator.get_resistance_empirical(BrCl / 1000.0);
             Display.showSingleValue(r);
             LedPanel->myShow();
-            if (delayAndTestWirePluggedInFoil(100)) {
+            /*if (delayAndTestWirePluggedInFoil(100)) {
                 break;
-            }
+            }*/
+            vTaskDelay(100 / portTICK_PERIOD_MS);
             goto loop_end;
         }
 

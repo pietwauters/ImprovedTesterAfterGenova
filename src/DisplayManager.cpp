@@ -4,62 +4,64 @@
 
 #include "globals.h"
 
-static Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+// Convenience reference to the singleton
+DisplayManager& Display = DisplayManager::instance();
 
 void DisplayManager::begin() {
+    if (initialized)
+        return;
+    initialized = true;
     Wire.begin(SDA_PIN, SCL_PIN);
-    display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-    display.setRotation(2);
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 12);
-    display.print(F("Tester v1.1.14\n"));
-    display.cp437(true);
-    display.setCursor(0, 12);
-    // display.printf("Resistance: %.2f ", 0.34);
-    // display.write(0xEA);
-    display.println();
-    display.display();
-    setMode("Waiting");
-    showMode();
+    Adafruit_SSD1306::begin(SSD1306_SWITCHCAPVCC, 0x3C);
+    setRotation(2);
+    clearDisplay();
+    setTextSize(1);
+    setCursor(0, 0);
+    setTextColor(SSD1306_WHITE);
+    cp437(true);
+    display();
+    setMode("");
+    // showMode();
 }
 
 constexpr int R_X = 0;
 constexpr int R_Y = 15;
 constexpr int R_X_Subscript = R_X + 12;
 constexpr int R_Y_Subscript = R_Y + 10;
-void DisplayManager::initForSingleValue(const char* label) {
-    display.clearDisplay();
-    showMode();
-    display.setTextSize(2);
-    display.setCursor(R_X, R_Y);
-    display.printf("R");
-    display.setTextSize(1);
-    display.setCursor(R_X_Subscript, R_Y_Subscript);
-    display.printf(label);
 
-    display.setTextSize(2);
-    CursX = display.getCursorX();
-    display.setCursor(CursX, R_Y);
-    display.printf(" = ");
-    CursX = display.getCursorX();
-    display.display();
+void DisplayManager::initForSingleValue(const char* label) {
+    clearDisplay();
+    showMode();
+    setTextSize(2);
+    setCursor(R_X, R_Y);
+    printf("R");
+    setTextSize(1);
+    setCursor(R_X_Subscript, R_Y_Subscript);
+    printf(label);
+
+    setTextSize(2);
+    CursX = getCursorX();
+    setCursor(CursX, R_Y);
+
+    printf(" = ");
+    CursX = getCursorX();
+    display();
     // calculate clearing rectangle
     const char* mask = "50.99 ";
-    display.getTextBounds(mask, CursX, R_Y, &x1, &y1, &w, &h);
+    getTextBounds(mask, CursX, R_Y, &x1, &y1, &w, &h);
 }
 void DisplayManager::showMode() {
-    display.setTextSize(1);
-    // display.setCursor(R_X_Subscript + 4, 0);
-    display.setCursor(0, 0);
-    display.printf(mode);
-    display.display();
+    clearDisplay();
+    setTextSize(1);
+    setCursor(0, 0);
+    printf(mode);
+    printf(":");
+    display();
 }
 
 void DisplayManager::showSingleValue(float r) {
-    display.setTextSize(2);
-    display.setCursor(CursX, 14);
+    setTextSize(2);
+    setCursor(CursX, 14);
     if (r < 0.0) {
         r = 0.0;
     }
@@ -71,21 +73,64 @@ void DisplayManager::showSingleValue(float r) {
         lastvalue = r;
     }
 
-    display.fillRect(CursX, 14, w, h, BLACK);
+    fillRect(CursX, 14, w, h, BLACK);
 
     if (r < 50.0f) {
         if (r < 0.0f)
             r = 0.0f;
-        display.printf("%.1f", lastvalue);
+        printf("%.1f", lastvalue);
     } else {
-        display.printf("----");
+        printf("----");
     }
-    display.display();
+    display();
 }
 
 void DisplayManager::clear() {
-    display.clearDisplay();
-    display.display();
+    clearDisplay();
+    display();
 }
 
-DisplayManager Display;
+void DisplayManager::printUnderlined(const char* text) {
+    int16_t tx1, ty1;
+    uint16_t tw, th;
+    int16_t cx = getCursorX();
+    int16_t cy = getCursorY();
+    getTextBounds(text, cx, cy, &tx1, &ty1, &tw, &th);
+    print(text);
+    if (tx1 > 1) {
+        drawFastHLine(tx1 - 2, ty1 + th + 1, tw + 2, SSD1306_WHITE);
+    } else {
+        drawFastHLine(tx1, ty1 + th + 1, tw, SSD1306_WHITE);
+    }
+}
+
+void DisplayManager::showWiretesting1() {
+    clearDisplay();
+    setTextSize(1);
+    setCursor(2, 0);
+    printUnderlined("A-A'");
+    printf("    ");
+    printUnderlined("B-B'");
+    printf("    ");
+    printUnderlined("C-C'");
+
+    display();
+}
+
+String DisplayManager::formatResistance(float r) {
+    if (r < 0.0f)
+        r = 0.0f;
+    if (r >= OPEN_RESISTANCE)
+        return "---";
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%.1f", r);
+    return String(buf);
+}
+
+void DisplayManager::showWiretesting1Values(float r1, float r2, float r3) {
+    fillRect(0, 18, 128, 32 - 18, BLACK);
+    setCursor(2, 18);
+    printf("%-5s   %-5s   %-5s", formatResistance(r1).c_str(), formatResistance(r2).c_str(),
+           formatResistance(r3).c_str());
+    display();
+}
