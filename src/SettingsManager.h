@@ -47,6 +47,13 @@ class SettingsManager {
         Setting() : type(BOOL), value(nullptr), size(0), readonly(false) {}
     };
 
+    struct Button {
+        String id;         // unique id, used for the action endpoint
+        String label;      // display text
+        String sectionId;  // which section to render in (empty = unsectioned / general)
+        std::function<void()> callback;
+    };
+
     SettingsManager() = default;
 
     // Section Management
@@ -87,6 +94,9 @@ class SettingsManager {
     // Add callback for when settings are saved via web interface
     void setPostSaveCallback(std::function<void()> callback);
 
+    // Add a button with a server-side callback (rendered in the given section)
+    void addButton(const char* id, const char* label, std::function<void()> callback, const char* sectionId = nullptr);
+
    private:
     Preferences prefs;
     String namespaceStr;
@@ -94,6 +104,7 @@ class SettingsManager {
 
     std::vector<Setting> settings;
     std::vector<SettingGroup> sections;
+    std::vector<Button> buttons;
 
     // Hash-based safe key generator
     String makeHashedKey(const String& base, size_t index);
@@ -103,6 +114,7 @@ class SettingsManager {
 
     String generateHTML();
     String generateSettingHTML(const Setting& s);
+    String generateButtonHTML(const Button& btn);
 
     // Helper methods for section management
     SettingGroup* findSection(const String& id);

@@ -78,6 +78,7 @@ int CalibrationDisplayChannel = 0;   // Default to channel 0
 bool CalibrationAutoMode = false;    // Auto mode flag
 int Brightness = BRIGHTNESS_NORMAL;  // Default brightness level
 
+// Below are the threshold values that determine color coding
 // Bodycord thresholds
 float BodycordThreshold = 1.0;
 
@@ -93,7 +94,23 @@ float EpeeMassProbeThreshold = 5.0;
 
 // Lamé thresholds
 float LameThreshold = 1.0;
+void ResetToFIEThresholds() {
+    // Bodycord thresholds
+    BodycordThreshold = 1.0;
 
+    // Foil thresholds
+    FoilSingleWireThreshold = 1.0;
+    FoilLoopThreshold = 2.0;
+    FoilMassProbeThreshold = 5.0;
+
+    // Epee thresholds
+    EpeeSingleWireThreshold = 1.0;
+    EpeeLoopThreshold = 2.0;
+    EpeeMassProbeThreshold = 5.0;
+
+    // Lamé thresholds
+    LameThreshold = 1.0;
+}
 AsyncWebServer server(80);
 SettingsManager settings;
 WebTerminal terminal(server);
@@ -321,7 +338,8 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
 }
 
 void LoadSettings() {
-    // Register settings
+    // Register ALL settings before calling load(), so every setting is
+    // populated from NVS on startup (not just the ones registered first).
 
     settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
     settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
@@ -332,15 +350,6 @@ void LoadSettings() {
     settings.addString("name", "Device Name", &deviceName);
     // settings.addInt("R1_R2", "R1_R2 (total resistance (Ron + 2 x 47)", &R0);
     // settings.addInt("Vmax", "Vmax in mV", &Vmax);
-    settings.begin("Settings");  // for Preferences namespace
-    settings.load();
-    if (!settings.keyExists("ShowWelcome")) {
-        ShowWelcome = true;
-        settings.save();
-    }
-    if (Brightness < 1) {
-        Brightness = BRIGHTNESS_NORMAL;
-    }
 
     settings.addSection("Advanced", "Advanced Settings", 1, true, true);
     settings.addSubsection("WireThresholds", "Thresholds for body cord", "Advanced", 1, true, true);
@@ -367,6 +376,25 @@ void LoadSettings() {
 
     // Lame thresholds
     settings.addFloat("LameThreshold", "Lamé threshold", &LameThreshold, "LameThresholds");
+
+    settings.addButton(
+        "reset_fie", "Reset to FIE",
+        []() {
+            ResetToFIEThresholds();
+            settings.save();  // persist the reset values to NVS
+        },
+        "Advanced");
+
+    // Now load — all settings are registered so every value is restored from NVS
+    settings.begin("Settings");  // for Preferences namespace
+    settings.load();
+    if (!settings.keyExists("ShowWelcome")) {
+        ShowWelcome = true;
+        settings.save();
+    }
+    if (Brightness < 1) {
+        Brightness = BRIGHTNESS_NORMAL;
+    }
 }
 
 void SetupNetworkStuff() {
