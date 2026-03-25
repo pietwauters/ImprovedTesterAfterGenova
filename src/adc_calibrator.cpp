@@ -144,14 +144,21 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
 
     // Quadratic formula: R = (-b ± sqrt(b^2 - 4ac)) / (2a)
     // Note: a = (v_diff - v_gpio) is always negative since v_diff < v_gpio
-    float discriminant = b * b - 4 * a * c;
+    float discriminant = b * b - 4.0 * a * c;
     if (discriminant < 0) {
         return -1.0f;  // No real solution
     }
 
     float sqrt_discriminant = sqrtf(discriminant);
+    /*
     float r1 = (-b + sqrt_discriminant) / (2 * a);
     float r2 = (-b - sqrt_discriminant) / (2 * a);
+*/
+
+    // Numerically stable solution
+    float q = -0.5f * (b + (b > 0 ? sqrt_discriminant : -sqrt_discriminant));
+    float r1 = q / a;
+    float r2 = c / q;
 
     // Choose the positive solution
     // Since a < 0, when dividing by 2a, signs flip
@@ -242,6 +249,7 @@ int EmpiricalResistorCalibrator::voltage_to_adc_raw(float voltage) {
 
 // Helper function to convert voltage back to resistance using empirical model
 // Solves: V_diff = V_gpio * R / (R + R1_R2 + correction/R) for R
+/*
 float EmpiricalResistorCalibrator::voltage_to_resistance(float v_diff, float v_gpio, float r1_r2, float correction) {
     if (v_diff <= 0 || v_gpio <= 0)
         return -1.0f;
@@ -277,83 +285,69 @@ float EmpiricalResistorCalibrator::voltage_to_resistance(float v_diff, float v_g
 
     return -1.0f;  // No valid solution
 }
+*/
+// Golden section search: finds the minimum of a unimodal function on [a, b] to within tol.
+// Converges in ~log(tol/(b-a)) / log(0.618) evaluations — far fewer than a linear sweep.
+template <typename CostFn>
+static float golden_min(CostFn cost, float a, float b, float tol = 0.05f) {
+    constexpr float phi = 0.6180339887f;  // (sqrt(5)-1)/2
+    float c = b - phi * (b - a);
+    float d = a + phi * (b - a);
+    float fc = cost(c), fd = cost(d);
+    while (b - a > tol) {
+        if (fc < fd) {
+            b = d;
+            d = c;
+            fd = fc;
+            c = b - phi * (b - a);
+            fc = cost(c);
+        } else {
+            a = c;
+            c = d;
+            fc = fd;
+            d = a + phi * (b - a);
+            fd = cost(d);
+        }
+    }
+    return 0.5f * (a + b);
+}
 
 // Helper function for weighted slope optimization using relative errors
 // Uses hybrid weighting to balance accuracy across the full resistance range
 float EmpiricalResistorCalibrator::optimize_slope_weighted(float* R_values, float* V_diff_values, int num_points,
                                                            float v_gpio_open) {
-    float best_r1_r2 = 100.0f;
-    float best_error = 1e10f;
-
-    // Sweep R1_R2 from 70 to 200 ohms
-    for (float r1_r2_test = 70.0f; r1_r2_test <= 200.0f; r1_r2_test += 1.0f) {
-        float weighted_error = 0.0f;
-        float total_weight = 0.0f;
-
+    auto cost = [&](float r1_r2_test) {
+        float weighted_error = 0.0f, total_weight = 0.0f;
         for (int i = 0; i < num_points; i++) {
-            // Calculate predicted voltage with current correction for this iteration
             float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_test, this->correction);
-
-            // Calculate relative error (percentage error) for better accuracy metric
             float relative_error = (V_predicted - V_diff_values[i]) / V_diff_values[i];
-
-            // Hybrid weighting: emphasize high R (where R1_R2 dominates) but don't ignore low R
-            // weight = alpha*R + beta/R balances both regimes
-            // For slope optimization, bias toward high R where R1_R2 has most effect
+            // Hybrid weighting: bias toward high R where R1_R2 has most effect
             float weight = R_values[i] + 0.5f / (R_values[i] + 0.1f);
-
             weighted_error += weight * relative_error * relative_error;
             total_weight += weight;
         }
-
-        if (total_weight > 0) {
-            weighted_error /= total_weight;
-            if (weighted_error < best_error) {
-                best_error = weighted_error;
-                best_r1_r2 = r1_r2_test;
-            }
-        }
-    }
-
-    return best_r1_r2;
+        return total_weight > 0 ? weighted_error / total_weight : 1e10f;
+    };
+    return golden_min(cost, 70.0f, 200.0f);
 }
 
 // Helper function for correction factor sweep optimization using relative errors
 // Emphasizes low R values where correction term has maximum effect
 float EmpiricalResistorCalibrator::optimize_correction_sweep(float* R_values, float* V_diff_values, int num_points,
                                                              float v_gpio_open, float r1_r2_fixed) {
-    float best_correction = 0.0f;
-    float best_error = 1e10f;
-
-    // Sweep correction from -100 to 150
-    for (float correction_test = -100.0f; correction_test <= 150.0f; correction_test += 1.0f) {
-        float weighted_error = 0.0f;
-        float total_weight = 0.0f;
-
+    auto cost = [&](float correction_test) {
+        float weighted_error = 0.0f, total_weight = 0.0f;
         for (int i = 0; i < num_points; i++) {
             float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_fixed, correction_test);
-
-            // Calculate relative error (percentage error) for better accuracy metric
             float relative_error = (V_predicted - V_diff_values[i]) / V_diff_values[i];
-
-            // Strong emphasis on low R where Correction/R term dominates
-            // Inverse weighting with small offset to avoid division by zero
+            // Inverse weighting: emphasize low R where Correction/R term dominates
             float weight = 1.0f / (R_values[i] + 0.1f);
-
             weighted_error += weight * relative_error * relative_error;
             total_weight += weight;
         }
-
-        if (total_weight > 0) {
-            weighted_error /= total_weight;
-            if (weighted_error < best_error) {
-                best_error = weighted_error;
-                best_correction = correction_test;
-            }
-        }
-    }
-
-    return best_correction;
+        return total_weight > 0 ? weighted_error / total_weight : 1e10f;
+    };
+    return golden_min(cost, -100.0f, 150.0f);
 }
 
 // Helper function to show calibration quality metrics
@@ -602,7 +596,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
     float best_correction = this->correction;
 
     // Iterate to refine both parameters (handles coupling between R1_R2 and Correction)
-    const int max_iterations = 5;
+    const int max_iterations = 10;
     for (int iter = 0; iter < max_iterations; iter++) {
         printf("Iteration %d:\n", iter + 1);
 
