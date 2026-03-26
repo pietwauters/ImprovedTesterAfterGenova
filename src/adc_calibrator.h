@@ -21,7 +21,11 @@ class EmpiricalResistorCalibrator {
     // Get resistance from differential measurement using empirical model
     float get_resistance_empirical(float v_diff_measured) const;
 
-    // Get ADC raw threshold for a resistance threshold, compensating for test lead resistance
+    // Get threshold in millivolts — matches the unit returned by getDifferentialSample().
+    // Use this for all threshold comparisons (replaces get_adc_threshold_for_resistance_with_leads).
+    int get_mv_threshold(float resistance_ohm, float lead_ohm = 0.0f) const;
+
+    // DEPRECATED: returns raw ADC counts, not millivolts — unit mismatch with getDifferentialSample().
     uint32_t get_adc_threshold_for_resistance_with_leads(float resistance_threshold, float lead_resistance = 0.0f);
 
     // Save/load calibration
@@ -51,6 +55,11 @@ class EmpiricalResistorCalibrator {
     // Check if calibrator is properly calibrated
     bool is_calibrated() const { return v_gpio > 0 && r1_r2 > 0; }
 
+    // Roundtrip diagnostic: shows whether thresholds and measurements share the same unit.
+    // Prints for each R: expected model mV, raw ADC threshold, ratio, and both roundtrips back to Ω.
+    // If ratio ≈ 1.0 → units match; if ratio ≈ 1.05 → raw ADC ≠ mV (known unit mismatch).
+    void print_roundtrip_diagnostics(float lead_ohm = 0.0f);
+
    private:
     // ADC channels
     adc1_channel_t channel_top;
@@ -65,7 +74,7 @@ class EmpiricalResistorCalibrator {
     esp_adc_cal_characteristics_t adc_chars;
 
     // Helper functions
-    float calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction);
+    float calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction) const;
     float voltage_to_resistance(float v_diff, float v_gpio, float r1_r2, float correction);
     bool least_squares_fit(float* R_values, float* V_diff_values, int num_points);
     int voltage_to_adc_raw(float voltage);  // Convert voltage to ADC raw value

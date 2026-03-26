@@ -28,13 +28,15 @@ Tester::~Tester() {
 
 void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
     for (int i = 0; i < 11; i++) {
-        myRefs_Ohm[i] = mycalibrator.get_adc_threshold_for_resistance_with_leads(1.0 * i, RLead);
-        // printf("Threshold[%d] = %d\n", i, myRefs_Ohm[i]);
+        myRefs_Ohm[i] = mycalibrator.get_mv_threshold(1.0f * i, RLead);
+        // printf("Threshold[%d] = %d mV\n", i, myRefs_Ohm[i]);
     }
-    Ohm_20 = mycalibrator.get_adc_threshold_for_resistance_with_leads(20.0, RLead);
-    Ohm_25 = mycalibrator.get_adc_threshold_for_resistance_with_leads(25.0, RLead);
-    Ohm_30 = mycalibrator.get_adc_threshold_for_resistance_with_leads(30.0, RLead);
-    Ohm_50 = mycalibrator.get_adc_threshold_for_resistance_with_leads(50.0, RLead);
+    Ohm_1p5 = mycalibrator.get_mv_threshold(1.4f, RLead);
+    Ohm_20 = mycalibrator.get_mv_threshold(20.0f, RLead);
+    Ohm_25 = mycalibrator.get_mv_threshold(25.0f, RLead);
+    Ohm_30 = mycalibrator.get_mv_threshold(30.0f, RLead);
+    Ohm_50 = mycalibrator.get_mv_threshold(50.0f, RLead);
+    // mycalibrator.print_roundtrip_diagnostics(RLead);
 }
 
 void Tester::begin(bool ForceCalibration) {
@@ -67,7 +69,7 @@ void Tester::begin(bool ForceCalibration) {
     LedPanel->SetBlinkColor(DefaultBlinkColor);
     AverageLeadResistance = rtc.retrieve("LeadR", 0.0f);
 
-    if (AverageLeadResistance > 0.0) {
+    if (AverageLeadResistance > 0.0f) {
         LedPanel->SetBlinkColor(LedPanel->m_Blue);
     }
     UpdateThresholdsWithLeadResistance(0.0);
@@ -245,10 +247,10 @@ void Tester::handleWireTestingState1() {
     int brBlValue = currentMeasurements_.get(Terminal::Br, Terminal::Bl);
     int crCLValue = currentMeasurements_.get(Terminal::Cr, Terminal::Cl);
     int arALValue = currentMeasurements_.get(Terminal::Ar, Terminal::Al);
-    // printf("Rbb = %.1f\n", mycalibrator.get_resistance_empirical(brBlValue / 1000.0));
-    Display.showWiretesting1Values(mycalibrator.get_resistance_empirical(crCLValue / 1000.0),
-                                   mycalibrator.get_resistance_empirical(arALValue / 1000.0),
-                                   mycalibrator.get_resistance_empirical(brBlValue / 1000.0));
+    // printf("Rbb = %.1f\n", mycalibrator.get_resistance_empirical(brBlValue / 1000.0f));
+    Display.showWiretesting1Values(mycalibrator.get_resistance_empirical(crCLValue / 1000.0f),
+                                   mycalibrator.get_resistance_empirical(arALValue / 1000.0f),
+                                   mycalibrator.get_resistance_empirical(brBlValue / 1000.0f));
     allGood = doQuickCheck();
 
     if (allGood) {
@@ -284,7 +286,7 @@ void Tester::handleWireTestingState1() {
         if (currentMeasurements_.get(Terminal::Cr, Terminal::Cl) < myRefs_Ohm[1] &&
             currentMeasurements_.get(Terminal::Ar, Terminal::Al) < myRefs_Ohm[1] &&
             currentMeasurements_.get(Terminal::Br, Terminal::Bl) < myRefs_Ohm[1]) {
-            AverageLeadResistance = 0.0;
+            AverageLeadResistance = 0.0f;
 
             Terminal straightTerminals[3] = {Terminal::Cr, Terminal::Ar, Terminal::Br};
             Terminal leftTerminals[3] = {Terminal::Cl, Terminal::Al, Terminal::Bl};
@@ -293,17 +295,17 @@ void Tester::handleWireTestingState1() {
                 Terminal rightTerm = straightTerminals[i];
                 Terminal leftTerm = leftTerminals[i];
                 int measurementValue = currentMeasurements_.get(rightTerm, leftTerm);
-                leadresistances[i] = mycalibrator.get_resistance_empirical(measurementValue / 1000.0);
+                leadresistances[i] = mycalibrator.get_resistance_empirical(measurementValue / 1000.0f);
 
                 AverageLeadResistance += leadresistances[i];
                 printf("Resistance lead[%d] = %.2f Ohm\n", i, leadresistances[i]);
                 fflush(stdout);                 // Force flush
                 vTaskDelay(pdMS_TO_TICKS(10));  // Small delay
             }
-            if (AverageLeadResistance > 0.0) {
-                AverageLeadResistance /= 3.0;
+            if (AverageLeadResistance > 0.0f) {
+                AverageLeadResistance /= 3.0f;
             } else {
-                AverageLeadResistance = 0.0;
+                AverageLeadResistance = 0.0f;
             }
             printf("Average lead resistance = %f & setting blue\n", AverageLeadResistance);
             LedPanel->SetBlinkColor(LedPanel->m_Blue);
@@ -342,9 +344,9 @@ void Tester::handleWireTestingState2() {
             AvBB += brBlValue;
             AvCC += crCLValue;
             if (!(i % 10)) {
-                Display.showWiretesting1Values(mycalibrator.get_resistance_empirical(AvCC / 10000.0),
-                                               mycalibrator.get_resistance_empirical(AvAA / 10000.0),
-                                               mycalibrator.get_resistance_empirical(AvBB / 10000.0));
+                Display.showWiretesting1Values(mycalibrator.get_resistance_empirical(AvCC / 10000.0f),
+                                               mycalibrator.get_resistance_empirical(AvAA / 10000.0f),
+                                               mycalibrator.get_resistance_empirical(AvBB / 10000.0f));
                 AvAA = 0;
                 AvBB = 0;
                 AvCC = 0;
@@ -363,9 +365,9 @@ void Tester::handleWireTestingState2() {
         brBlValue = currentMeasurements_.get(Terminal::Br, Terminal::Bl);
         crCLValue = currentMeasurements_.get(Terminal::Cr, Terminal::Cl);
         arALValue = currentMeasurements_.get(Terminal::Ar, Terminal::Al);
-        Display.showWiretesting1Values(mycalibrator.get_resistance_empirical(crCLValue / 1000.0),
-                                       mycalibrator.get_resistance_empirical(arALValue / 1000.0),
-                                       mycalibrator.get_resistance_empirical(brBlValue / 1000.0));
+        Display.showWiretesting1Values(mycalibrator.get_resistance_empirical(crCLValue / 1000.0f),
+                                       mycalibrator.get_resistance_empirical(arALValue / 1000.0f),
+                                       mycalibrator.get_resistance_empirical(brBlValue / 1000.0f));
 
         allGood &= animateSingleWire(currentMeasurements_, Terminal::Cr);
         allGood &= animateSingleWire(currentMeasurements_, Terminal::Ar);
@@ -475,7 +477,7 @@ bool Tester::delayAndTestWirePluggedInEpeeAndShowConnectionValue(long delay, Ter
             Display.showSingleValue(9999.99);  // indicate invalid/unavailable
         }
 
-        float r = mycalibrator.get_resistance_empirical(raw / 1000.0);
+        float r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
         Display.showSingleValue(r);
     }
     return false;
@@ -545,7 +547,7 @@ void Tester::doEpeeTest() {
                 }
             }
             LedPanel->myShow();
-            float r = mycalibrator.get_resistance_empirical(BrCl / 1000.0);
+            float r = mycalibrator.get_resistance_empirical(BrCl / 1000.0f);
             Display.showSingleValue(r);
             /*if (delayAndTestWirePluggedInFoil(100)) {
                 break;
@@ -564,7 +566,7 @@ void Tester::doEpeeTest() {
         if ((arBr > 1500 && brCr > 1500) && arCl > 600) {
             // Show color based on ArCr
 
-            // printf("Rac = %.1f\n", mycalibrator.get_resistance_empirical(arCr / 1000.0));
+            // printf("Rac = %.1f\n", mycalibrator.get_resistance_empirical(arCr / 1000.0f));
             if (arCr < myRefs_Ohm[2]) {
                 tempColor = LedPanel->m_Green;
                 // LedPanel->SetInner9(LedPanel->m_Green);
@@ -590,7 +592,7 @@ void Tester::doEpeeTest() {
             }
             LedPanel->SetInner9(tempColor);
             LedPanel->myShow();
-            float r = mycalibrator.get_resistance_empirical(arCr / 1000.0);
+            float r = mycalibrator.get_resistance_empirical(arCr / 1000.0f);
             Display.showSingleValue(r);
             if (delayAndTestWirePluggedInEpeeAndShowConnectionValue(1000, Terminal::Ar, Terminal::Cr)) {
                 break;
@@ -623,7 +625,7 @@ void Tester::doEpeeTest() {
             }
             LedPanel->SetInner9(tempColor);
             LedPanel->myShow();
-            float r = mycalibrator.get_resistance_empirical(arCl / 1000.0);
+            float r = mycalibrator.get_resistance_empirical(arCl / 1000.0f);
             Display.showSingleValue(r);
             if (delayAndTestWirePluggedInEpeeAndShowConnectionValue(1000, Terminal::Ar, Terminal::Cl)) {
                 break;
@@ -637,12 +639,12 @@ void Tester::doEpeeTest() {
             LedPanel->ClearAll();
             Display.initForSingleValue("mass");
             if (arBr < 1500) {
-                float r = mycalibrator.get_resistance_empirical(arBr / 1000.0);
+                float r = mycalibrator.get_resistance_empirical(arBr / 1000.0f);
                 Display.showSingleValue(r);
                 LedPanel->AnimateArBrConnection();
             }
             if (brCr < 1500) {
-                float r = mycalibrator.get_resistance_empirical(brCr / 1000.0);
+                float r = mycalibrator.get_resistance_empirical(brCr / 1000.0f);
                 Display.showSingleValue(r);
                 LedPanel->AnimateBrCrConnection();
             }
@@ -697,7 +699,7 @@ void Tester::doFoilTest() {
                     LedPanel->Draw_P(LedPanel->m_Orange);
                 }
             }
-            r = mycalibrator.get_resistance_empirical(BrCl / 1000.0);
+            r = mycalibrator.get_resistance_empirical(BrCl / 1000.0f);
             Display.showSingleValue(r);
             LedPanel->myShow();
             /*if (delayAndTestWirePluggedInFoil(100)) {
@@ -715,7 +717,7 @@ void Tester::doFoilTest() {
                 Display.initForSingleValue("a_b");
             }
         }
-        r = mycalibrator.get_resistance_empirical(arBr / 1000.0);
+        r = mycalibrator.get_resistance_empirical(arBr / 1000.0f);
 
         if (arBr < myRefs_Ohm[2]) {
             LedPanel->Draw_F(LedPanel->m_Green);
@@ -763,7 +765,7 @@ void Tester::doFoilTest() {
                 LedPanel->SetInner9(LedPanel->m_White);
             }
 
-            r = mycalibrator.get_resistance_empirical(ArCl / 1000.0);
+            r = mycalibrator.get_resistance_empirical(ArCl / 1000.0f);
             Display.showSingleValue(r);
             LedPanel->myShow();
 
@@ -795,20 +797,20 @@ void Tester::doLameTest() {
 
     // Initial capture before entering loop
     Capture_.captureMatrix3x3(currentMeasurements_);
-    float r = 0.0;
+    float r = 0.0f;
     while (!MeasurementAnalysis::isWirePluggedIn(currentMeasurements_)) {
         esp_task_wdt_reset();
 
         if (int raw = Capture_.measureBrCr(); raw < myRefs_Ohm[5]) {
             LedPanel->DrawDiamond(LedPanel->m_Green);
             bShowingRed = false;
-            r = mycalibrator.get_resistance_empirical(raw / 1000.0);
+            r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
             Display.showSingleValue(r);
             // while((testBrCr()<myRefs_Ohm[5])){esp_task_wdt_reset();};
             while (debouncedCondition(
                 [this]() {
                     int temp = Capture_.measureBrCr();
-                    float r = mycalibrator.get_resistance_empirical(temp / 1000.0);
+                    float r = mycalibrator.get_resistance_empirical(temp / 1000.0f);
                     Display.showSingleValue(r);
                     return temp < myRefs_Ohm[5];
                 },
@@ -817,13 +819,13 @@ void Tester::doLameTest() {
             if (int raw = Capture_.measureBrCr(); raw < myRefs_Ohm[10]) {
                 LedPanel->DrawDiamond(LedPanel->m_Yellow);
                 bShowingRed = false;
-                r = mycalibrator.get_resistance_empirical(raw / 1000.0);
+                r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                 Display.showSingleValue(r);
                 // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
                 while (debouncedCondition(
                     [this]() {
                         int temp = Capture_.measureBrCr();
-                        float r = mycalibrator.get_resistance_empirical(temp / 1000.0);
+                        float r = mycalibrator.get_resistance_empirical(temp / 1000.0f);
                         Display.showSingleValue(r);
                         return ((temp < myRefs_Ohm[10]) && (temp >= myRefs_Ohm[5]));
                     },
@@ -832,13 +834,13 @@ void Tester::doLameTest() {
                 if (int raw = Capture_.measureBrCr(); raw < Ohm_25) {
                     LedPanel->DrawDiamond(LedPanel->m_Orange);
                     bShowingRed = false;
-                    r = mycalibrator.get_resistance_empirical(raw / 1000.0);
+                    r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                     Display.showSingleValue(r);
                     // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
                     while (debouncedCondition(
                         [this]() {
                             int temp = Capture_.measureBrCr();
-                            float r = mycalibrator.get_resistance_empirical(temp / 1000.0);
+                            float r = mycalibrator.get_resistance_empirical(temp / 1000.0f);
                             Display.showSingleValue(r);
                             return ((temp < myRefs_Ohm[25]) && (temp >= myRefs_Ohm[10]));
                         },
@@ -846,7 +848,7 @@ void Tester::doLameTest() {
                 } else {
                     // Do Red stuff
                     bShowingRed = true;
-                    r = mycalibrator.get_resistance_empirical(raw / 1000.0);
+                    r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                     Display.showSingleValue(r);
                     LedPanel->DrawDiamond(LedPanel->m_Red);
                     LedPanel->setBuzz(true);
@@ -874,7 +876,7 @@ bool Tester::DebounceTest(int LowBound, int HighBound) {
         return false;
     }
     int crCl = currentMeasurements_.get(Terminal::Cr, Terminal::Cl);
-    float r = mycalibrator.get_resistance_empirical(crCl / 1000.0);
+    float r = mycalibrator.get_resistance_empirical(crCl / 1000.0f);
     Display.showSingleValue(r);
     return ((crCl >= LowBound) && (crCl < HighBound));
 }
@@ -893,21 +895,21 @@ void Tester::doLameTest_Top() {
         if (int raw = Capture_.measureCrCl(); raw < myRefs_Ohm[5]) {
             LedPanel->DrawDiamond(LedPanel->m_Green);
             bShowingRed = false;
-            float r = mycalibrator.get_resistance_empirical(raw / 1000.0);
+            float r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
             Display.showSingleValue(r);
             while (debouncedCondition([this]() { return DebounceTest(0, myRefs_Ohm[5]); }, 10));
         } else {
             if (int raw = Capture_.measureCrCl(); raw < myRefs_Ohm[10]) {
                 LedPanel->DrawDiamond(LedPanel->m_Yellow);
                 bShowingRed = false;
-                float r = mycalibrator.get_resistance_empirical(raw / 1000.0);
+                float r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                 Display.showSingleValue(r);
                 while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[5], myRefs_Ohm[10]); }, 10));
             } else {
                 if (int raw = Capture_.measureCrCl(); raw < Ohm_25) {
                     LedPanel->DrawDiamond(LedPanel->m_Orange);
                     bShowingRed = false;
-                    float r = mycalibrator.get_resistance_empirical(raw / 1000.0);
+                    float r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                     Display.showSingleValue(r);
                     // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
                     while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[10], Ohm_25); }, 10));
@@ -915,7 +917,7 @@ void Tester::doLameTest_Top() {
                     LedPanel->DrawDiamond(LedPanel->m_Red);
                     bShowingRed = true;
                     LedPanel->setBuzz(true);
-                    float r = mycalibrator.get_resistance_empirical(raw / 1000.0);
+                    float r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                     Display.showSingleValue(r);
                     if (delayAndTestWirePluggedInLameTestTop(250)) {
                         LedPanel->setBuzz(false);

@@ -144,7 +144,7 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
 
     // Quadratic formula: R = (-b ± sqrt(b^2 - 4ac)) / (2a)
     // Note: a = (v_diff - v_gpio) is always negative since v_diff < v_gpio
-    float discriminant = b * b - 4.0 * a * c;
+    float discriminant = b * b - 4.0f * a * c;
     if (discriminant < 0) {
         return -1.0f;  // No real solution
     }
@@ -222,7 +222,37 @@ uint32_t EmpiricalResistorCalibrator::get_adc_threshold_for_resistance_with_lead
     return (uint32_t)(raw_diff > 0 ? raw_diff : 0);  // Ensure non-negative result
 }
 
-float EmpiricalResistorCalibrator::calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction) {
+void EmpiricalResistorCalibrator::print_roundtrip_diagnostics(float lead_ohm) {
+    const float test_R[] = {1.0f, 2.0f, 3.0f, 5.0f, 10.0f, 20.0f, 25.0f, 30.0f, 50.0f};
+    const int n = (int)(sizeof(test_R) / sizeof(test_R[0]));
+
+    printf("\n=== Threshold Roundtrip Diagnostics (lead=%.2f Ohm) ===\n", lead_ohm);
+    printf("  R(Ohm) | thresh_mV | roundtrip_R | error_Ohm\n");
+    printf("  -------+-----------+-------------+----------\n");
+
+    // thresh_mV   : get_mv_threshold() — same unit as getDifferentialSample()
+    // roundtrip_R : thresh_mV/1000 -> get_resistance_empirical() — should recover R exactly
+    // error_Ohm   : roundtrip_R - R — should be ~0.00
+    for (int i = 0; i < n; i++) {
+        float R = test_R[i];
+        int thresh_mV = get_mv_threshold(R, lead_ohm);
+        float roundtrip = get_resistance_empirical((float)thresh_mV / 1000.0f) - lead_ohm;
+        printf("  %6.1f | %9d | %11.4f | %+.4f\n", R, thresh_mV, roundtrip, roundtrip - R);
+    }
+
+    printf("\n  All errors should be ~0.00 Ohm (units now match).\n");
+    printf("=== End Roundtrip Diagnostics ===\n\n");
+}
+
+int EmpiricalResistorCalibrator::get_mv_threshold(float resistance_ohm, float lead_ohm) const {
+    float total_R = resistance_ohm + lead_ohm;
+    if (total_R <= 0.001f)
+        return 0;
+    return (int)(calculate_model_voltage(total_R, v_gpio, r1_r2, correction) * 1000.0f);
+}
+
+float EmpiricalResistorCalibrator::calculate_model_voltage(float R_known, float v_gpio, float r1_r2,
+                                                           float correction) const {
     if (R_known <= 0.001f)  // Use small threshold instead of exact zero to avoid division issues
         return 0.0f;
     return v_gpio * R_known / (R_known + r1_r2 + correction / R_known);
