@@ -81,6 +81,7 @@ int Brightness = BRIGHTNESS_NORMAL;  // Default brightness level
 // Below are the threshold values that determine color coding
 // Bodycord thresholds
 float BodycordThreshold = 1.0;
+float ReelBodycordThreshold = 10.0f;  // Green threshold for reel-mode wire test (Ω)
 
 // Foil thresholds
 float FoilSingleWireThreshold = 1.0;
@@ -93,10 +94,11 @@ float EpeeLoopThreshold = 2.0;
 float EpeeMassProbeThreshold = 5.0;
 
 // Lamé thresholds
-float LameThreshold = 1.0;
+float LameThreshold = 5.0f;
 void ResetToFIEThresholds() {
     // Bodycord thresholds
     BodycordThreshold = 1.0;
+    ReelBodycordThreshold = 10.0f;
 
     // Foil thresholds
     FoilSingleWireThreshold = 1.0;
@@ -109,7 +111,7 @@ void ResetToFIEThresholds() {
     EpeeMassProbeThreshold = 5.0;
 
     // Lamé thresholds
-    LameThreshold = 1.0;
+    LameThreshold = 5.0f;
 }
 AsyncWebServer server(80);
 SettingsManager settings;
@@ -199,7 +201,11 @@ void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
 }
 
 // Function to synchronize myRefs_Ohm with StoredRefs_ohm after settings changes
-void synchronizeThresholdValues() {}
+void synchronizeThresholdValues() {
+    if (testerInstance) {
+        testerInstance->UpdateThresholdsWithLeadResistance(testerInstance->getAverageLeadResistance());
+    }
+}
 
 // This function should become part of the calibrationmodule
 /*
@@ -361,6 +367,7 @@ void LoadSettings() {
                                    "Only change the defaults if you know what you are doing!");
     // Bodycord thresholds
     settings.addFloat("BodycordThreshold", "Single wire threshold", &BodycordThreshold, "WireThresholds");
+    settings.addFloat("ReelBodycordThreshold", "Reel single wire threshold", &ReelBodycordThreshold, "WireThresholds");
 
     // Foil thresholds
     settings.addFloat("FoilSingleWireThreshold", "Single wire threshold (connector - tip)", &FoilSingleWireThreshold,

@@ -31,11 +31,43 @@ void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
         myRefs_Ohm[i] = mycalibrator.get_mv_threshold(1.0f * i, RLead);
         // printf("Threshold[%d] = %d mV\n", i, myRefs_Ohm[i]);
     }
-    Ohm_1p5 = mycalibrator.get_mv_threshold(1.4f, RLead);
     Ohm_20 = mycalibrator.get_mv_threshold(20.0f, RLead);
-    Ohm_25 = mycalibrator.get_mv_threshold(25.0f, RLead);
-    Ohm_30 = mycalibrator.get_mv_threshold(30.0f, RLead);
     Ohm_50 = mycalibrator.get_mv_threshold(50.0f, RLead);
+
+    // Lamé color breakpoints (×1, ×2, ×4 of LameThreshold)
+    Lame_Green = mycalibrator.get_mv_threshold(LameThreshold, RLead);
+    Lame_Yellow = mycalibrator.get_mv_threshold(LameThreshold * 2.0f, RLead);
+    Lame_Orange = mycalibrator.get_mv_threshold(LameThreshold * 4.0f, RLead);
+
+    // Foil body cord (loop) breakpoints
+    FoilLoop_Green = mycalibrator.get_mv_threshold(FoilLoopThreshold, RLead);
+    FoilLoop_Yellow = mycalibrator.get_mv_threshold(FoilLoopThreshold * 2.0f, RLead);
+    FoilLoop_Orange = mycalibrator.get_mv_threshold(FoilLoopThreshold * 4.0f, RLead);
+
+    // Foil/Epee tip wire (single wire) breakpoints
+    FoilTip_Green = mycalibrator.get_mv_threshold(FoilSingleWireThreshold, RLead);
+    FoilTip_Yellow = mycalibrator.get_mv_threshold(FoilSingleWireThreshold * 2.0f, RLead);
+    FoilTip_Orange = mycalibrator.get_mv_threshold(FoilSingleWireThreshold * 4.0f, RLead);
+
+    EpeeTip_Green = mycalibrator.get_mv_threshold(EpeeSingleWireThreshold, RLead);
+    EpeeTip_Yellow = mycalibrator.get_mv_threshold(EpeeSingleWireThreshold * 2.0f, RLead);
+    EpeeTip_Orange = mycalibrator.get_mv_threshold(EpeeSingleWireThreshold * 4.0f, RLead);
+
+    // Foil/Epee probe (BrCl) breakpoints — shared setting
+    Probe_Green = mycalibrator.get_mv_threshold(FoilMassProbeThreshold, RLead);
+    Probe_Yellow = mycalibrator.get_mv_threshold(FoilMassProbeThreshold * 2.0f, RLead);
+    Probe_Orange = mycalibrator.get_mv_threshold(FoilMassProbeThreshold * 4.0f, RLead);
+
+    // Epee return wire (loop) breakpoints
+    EpeeLoop_Green = mycalibrator.get_mv_threshold(EpeeLoopThreshold, RLead);
+    EpeeLoop_Yellow = mycalibrator.get_mv_threshold(EpeeLoopThreshold * 2.0f, RLead);
+    EpeeLoop_Orange = mycalibrator.get_mv_threshold(EpeeLoopThreshold * 4.0f, RLead);
+
+    // Main wire test (body cord) thresholds (×1, ×2 green/yellow; ×10 broken)
+    Bodycord_Green = mycalibrator.get_mv_threshold(BodycordThreshold, RLead);
+    Bodycord_Yellow = mycalibrator.get_mv_threshold(BodycordThreshold * 2.0f, RLead);
+    Bodycord_Broken = mycalibrator.get_mv_threshold(BodycordThreshold * 10.0f, RLead);
+
     // mycalibrator.print_roundtrip_diagnostics(RLead);
 }
 
@@ -530,21 +562,21 @@ void Tester::doEpeeTest() {
     while (!MeasurementAnalysis::isWirePluggedInEpee(currentMeasurements_)) {
         esp_task_wdt_reset();
         BrCl = Capture_.measureBrCl();
-        if (BrCl < 500) {
+        if (BrCl < ProbeConnectedThreshold) {
             // We're in Probe mode
             if (SHAPE_P != ShowingShape) {
                 LedPanel->ClearAll();
                 ShowingShape = SHAPE_P;
                 Display.initForSingleValue("probe");
             }
-            if (BrCl < myRefs_Ohm[5]) {
+            if (BrCl < Probe_Green) {
                 LedPanel->Draw_P(LedPanel->m_Green);
+            } else if (BrCl < Probe_Yellow) {
+                LedPanel->Draw_P(LedPanel->m_Yellow);
+            } else if (BrCl < Probe_Orange) {
+                LedPanel->Draw_P(LedPanel->m_Orange);
             } else {
-                if (BrCl < myRefs_Ohm[8]) {
-                    LedPanel->Draw_P(LedPanel->m_Yellow);
-                } else {
-                    LedPanel->Draw_P(LedPanel->m_Red);
-                }
+                LedPanel->Draw_P(LedPanel->m_Red);
             }
             LedPanel->myShow();
             float r = mycalibrator.get_resistance_empirical(BrCl / 1000.0f);
@@ -561,20 +593,17 @@ void Tester::doEpeeTest() {
         arBr = Capture_.measureArBr();
         brCr = Capture_.measureBrCr();
 
-        // Case 1: Both ArBr and BrCr > 1500, ArCl > 600
-        // No shorts -> Show E, ArCl > 600 means, no contact between tip and probe so measuring return wire
-        if ((arBr > 1500 && brCr > 1500) && arCl > 600) {
+        // Case 1: Both ArBr and BrCr > ShortDetectThreshold, ArCl > EpeeTipContactThreshold
+        // No shorts → measuring return wire (tip not touching probe)
+        if ((arBr > ShortDetectThreshold && brCr > ShortDetectThreshold) && arCl > EpeeTipContactThreshold) {
             // Show color based on ArCr
 
             // printf("Rac = %.1f\n", mycalibrator.get_resistance_empirical(arCr / 1000.0f));
-            if (arCr < myRefs_Ohm[2]) {
+            if (arCr < EpeeLoop_Green) {
                 tempColor = LedPanel->m_Green;
-                // LedPanel->SetInner9(LedPanel->m_Green);
-            } else if (arCr < myRefs_Ohm[4]) {
-                // LedPanel->SetInner9(LedPanel->m_Yellow);
+            } else if (arCr < EpeeLoop_Yellow) {
                 tempColor = LedPanel->m_Yellow;
-            } else if (arCr < 600) {
-                // LedPanel->SetInner9(LedPanel->m_Orange);
+            } else if (arCr < EpeeLoop_Orange) {
                 tempColor = LedPanel->m_Orange;
             } else {
                 // Above 600, don't show anything
@@ -600,15 +629,14 @@ void Tester::doEpeeTest() {
             // LedPanel->ClearAll();
             LedPanel->myShow();
         }
-        // Case 2: Both ArBr and BrCr > 1500, ArCl < 600
-        // No shorts -> Show E, ArCl < 600 means, contact between tip and probe so measuring single wire
-        else if ((arBr > 1500 && brCr > 1500) && arCl < 600) {
-            // Use thresholds divided by 2
-            if (arCl < myRefs_Ohm[1]) {
+        // Case 2: Both ArBr and BrCr > ShortDetectThreshold, ArCl < EpeeTipContactThreshold
+        // No shorts → tip touching probe, measuring single wire
+        else if ((arBr > ShortDetectThreshold && brCr > ShortDetectThreshold) && arCl < EpeeTipContactThreshold) {
+            if (arCl < EpeeTip_Green) {
                 tempColor = LedPanel->m_Green;
-            } else if (arCl < myRefs_Ohm[2]) {
+            } else if (arCl < EpeeTip_Yellow) {
                 tempColor = LedPanel->m_Yellow;
-            } else if (arCl < myRefs_Ohm[10]) {
+            } else if (arCl < EpeeTip_Orange) {
                 tempColor = LedPanel->m_Orange;
             } else {
                 if (SHAPE_E != ShowingShape) {
@@ -634,8 +662,8 @@ void Tester::doEpeeTest() {
 
             LedPanel->myShow();
         }
-        // Case 3: ArBr < 1500 or BrCr < 1500 (unwanted short)
-        else if (arBr < 1500 || brCr < 1500) {
+        // Case 3: ArBr < ShortDetectThreshold or BrCr < ShortDetectThreshold (unwanted short)
+        else if (arBr < ShortDetectThreshold || brCr < ShortDetectThreshold) {
             LedPanel->ClearAll();
             Display.initForSingleValue("mass");
             if (arBr < 1500) {
@@ -684,20 +712,20 @@ void Tester::doFoilTest() {
         esp_task_wdt_reset();
         LedPanel->myShow();
         BrCl = Capture_.measureBrCl();
-        if (BrCl < 500) {  // Probe Mode
+        if (BrCl < ProbeConnectedThreshold) {  // Probe Mode
             if (SHAPE_P != ShowingShape) {
                 LedPanel->ClearAll();
                 ShowingShape = SHAPE_P;
                 Display.initForSingleValue("probe");
             }
-            if (BrCl < myRefs_Ohm[5]) {
+            if (BrCl < Probe_Green) {
                 LedPanel->Draw_P(LedPanel->m_Green);
+            } else if (BrCl < Probe_Yellow) {
+                LedPanel->Draw_P(LedPanel->m_Yellow);
+            } else if (BrCl < Probe_Orange) {
+                LedPanel->Draw_P(LedPanel->m_Orange);
             } else {
-                if (BrCl < myRefs_Ohm[8]) {
-                    LedPanel->Draw_P(LedPanel->m_Yellow);
-                } else {
-                    LedPanel->Draw_P(LedPanel->m_Orange);
-                }
+                LedPanel->Draw_P(LedPanel->m_Red);
             }
             r = mycalibrator.get_resistance_empirical(BrCl / 1000.0f);
             Display.showSingleValue(r);
@@ -711,7 +739,7 @@ void Tester::doFoilTest() {
 
         arBr = Capture_.measureArBr();
         if (SHAPE_F != ShowingShape) {
-            if (arBr < 2000) {
+            if (arBr < WireConnectedThreshold) {
                 LedPanel->ClearAll();
                 ShowingShape = SHAPE_F;
                 Display.initForSingleValue("a_b");
@@ -719,25 +747,25 @@ void Tester::doFoilTest() {
         }
         r = mycalibrator.get_resistance_empirical(arBr / 1000.0f);
 
-        if (arBr < myRefs_Ohm[2]) {
+        if (arBr < FoilLoop_Green) {
             LedPanel->Draw_F(LedPanel->m_Green);
             Display.showSingleValue(r);
             goto loop_end;
-        } else if (arBr < myRefs_Ohm[4]) {
+        } else if (arBr < FoilLoop_Yellow) {
             LedPanel->Draw_F(LedPanel->m_Yellow);
             Display.showSingleValue(r);
             goto loop_end;
-        } else if (arBr < myRefs_Ohm[8]) {
+        } else if (arBr < FoilLoop_Orange) {
             LedPanel->Draw_F(LedPanel->m_Orange);
             Display.showSingleValue(r);
             goto loop_end;
         } else {
-            // Debounce: measureArBr() > 1500 must be true for 10ms
+            // Debounce: measureArBr() > FoilLoop_Orange must be true for 10ms
             bool debounced = true;
             unsigned long start = millis();
             while (millis() - start < 10) {
                 esp_task_wdt_reset();
-                if (Capture_.measureArBr() <= myRefs_Ohm[8]) {
+                if (Capture_.measureArBr() <= FoilLoop_Orange) {
                     debounced = false;
                     break;
                 }
@@ -755,11 +783,11 @@ void Tester::doFoilTest() {
                 Display.initForSingleValue("tip");
             }
             ArCl = Capture_.measureArCl();
-            if (ArCl < myRefs_Ohm[1]) {
+            if (ArCl < FoilTip_Green) {
                 LedPanel->SetInner9(LedPanel->m_Green);
-            } else if (ArCl < myRefs_Ohm[2]) {
+            } else if (ArCl < FoilTip_Yellow) {
                 LedPanel->SetInner9(LedPanel->m_Yellow);
-            } else if (ArCl < myRefs_Ohm[4]) {
+            } else if (ArCl < FoilTip_Orange) {
                 LedPanel->SetInner9(LedPanel->m_Orange);
             } else {
                 LedPanel->SetInner9(LedPanel->m_White);
@@ -772,7 +800,7 @@ void Tester::doFoilTest() {
             if (delayAndTestWirePluggedInFoil(1000)) {
                 break;
             }
-            if (Capture_.measureArBr() <= 1500) {
+            if (Capture_.measureArBr() <= ShortDetectThreshold) {
                 LedPanel->ClearAll();
                 LedPanel->myShow();
             }
@@ -801,48 +829,45 @@ void Tester::doLameTest() {
     while (!MeasurementAnalysis::isWirePluggedIn(currentMeasurements_)) {
         esp_task_wdt_reset();
 
-        if (int raw = Capture_.measureBrCr(); raw < myRefs_Ohm[5]) {
+        if (int raw = Capture_.measureBrCr(); raw < Lame_Green) {
             LedPanel->DrawDiamond(LedPanel->m_Green);
             bShowingRed = false;
             r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
             Display.showSingleValue(r);
-            // while((testBrCr()<myRefs_Ohm[5])){esp_task_wdt_reset();};
             while (debouncedCondition(
                 [this]() {
                     int temp = Capture_.measureBrCr();
                     float r = mycalibrator.get_resistance_empirical(temp / 1000.0f);
                     Display.showSingleValue(r);
-                    return temp < myRefs_Ohm[5];
+                    return temp < Lame_Green;
                 },
                 10));
         } else {
-            if (int raw = Capture_.measureBrCr(); raw < myRefs_Ohm[10]) {
+            if (int raw = Capture_.measureBrCr(); raw < Lame_Yellow) {
                 LedPanel->DrawDiamond(LedPanel->m_Yellow);
                 bShowingRed = false;
                 r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                 Display.showSingleValue(r);
-                // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
                 while (debouncedCondition(
                     [this]() {
                         int temp = Capture_.measureBrCr();
                         float r = mycalibrator.get_resistance_empirical(temp / 1000.0f);
                         Display.showSingleValue(r);
-                        return ((temp < myRefs_Ohm[10]) && (temp >= myRefs_Ohm[5]));
+                        return ((temp < Lame_Yellow) && (temp >= Lame_Green));
                     },
                     10));
             } else {
-                if (int raw = Capture_.measureBrCr(); raw < Ohm_25) {
+                if (int raw = Capture_.measureBrCr(); raw < Lame_Orange) {
                     LedPanel->DrawDiamond(LedPanel->m_Orange);
                     bShowingRed = false;
                     r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                     Display.showSingleValue(r);
-                    // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
                     while (debouncedCondition(
                         [this]() {
                             int temp = Capture_.measureBrCr();
                             float r = mycalibrator.get_resistance_empirical(temp / 1000.0f);
                             Display.showSingleValue(r);
-                            return ((temp < myRefs_Ohm[25]) && (temp >= myRefs_Ohm[10]));
+                            return ((temp < Lame_Orange) && (temp >= Lame_Yellow));
                         },
                         10));
                 } else {
@@ -892,27 +917,26 @@ void Tester::doLameTest_Top() {
 
     while (!MeasurementAnalysis::isWirePluggedInLameTop(currentMeasurements_)) {
         esp_task_wdt_reset();
-        if (int raw = Capture_.measureCrCl(); raw < myRefs_Ohm[5]) {
+        if (int raw = Capture_.measureCrCl(); raw < Lame_Green) {
             LedPanel->DrawDiamond(LedPanel->m_Green);
             bShowingRed = false;
             float r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
             Display.showSingleValue(r);
-            while (debouncedCondition([this]() { return DebounceTest(0, myRefs_Ohm[5]); }, 10));
+            while (debouncedCondition([this]() { return DebounceTest(0, Lame_Green); }, 10));
         } else {
-            if (int raw = Capture_.measureCrCl(); raw < myRefs_Ohm[10]) {
+            if (int raw = Capture_.measureCrCl(); raw < Lame_Yellow) {
                 LedPanel->DrawDiamond(LedPanel->m_Yellow);
                 bShowingRed = false;
                 float r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                 Display.showSingleValue(r);
-                while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[5], myRefs_Ohm[10]); }, 10));
+                while (debouncedCondition([this]() { return DebounceTest(Lame_Green, Lame_Yellow); }, 10));
             } else {
-                if (int raw = Capture_.measureCrCl(); raw < Ohm_25) {
+                if (int raw = Capture_.measureCrCl(); raw < Lame_Orange) {
                     LedPanel->DrawDiamond(LedPanel->m_Orange);
                     bShowingRed = false;
                     float r = mycalibrator.get_resistance_empirical(raw / 1000.0f);
                     Display.showSingleValue(r);
-                    // while((testBrCr()<myRefs_Ohm[10])){esp_task_wdt_reset();};
-                    while (debouncedCondition([this]() { return DebounceTest(myRefs_Ohm[10], Ohm_25); }, 10));
+                    while (debouncedCondition([this]() { return DebounceTest(Lame_Yellow, Lame_Orange); }, 10));
                 } else {
                     LedPanel->DrawDiamond(LedPanel->m_Red);
                     bShowingRed = true;
@@ -939,17 +963,17 @@ void Tester::doLameTest_Top() {
 
 void Tester::SetWiretestMode(bool Reelmode) {
     if (Reelmode) {
-        ReferenceBroken = Ohm_50;
-        ReferenceGreen = myRefs_Ohm[10];
-        ReferenceYellow = Ohm_20;
-        ReferenceOrange = Ohm_50;
+        ReferenceBroken = Reel_Broken;
+        ReferenceGreen = Reel_Green;
+        ReferenceYellow = Reel_Yellow;
+        ReferenceOrange = Reel_Broken;
         ReferenceShort = 300;
         ReelMode = true;
     } else {
-        ReferenceBroken = myRefs_Ohm[10];
-        ReferenceGreen = myRefs_Ohm[1];
-        ReferenceYellow = myRefs_Ohm[3];
-        ReferenceOrange = myRefs_Ohm[10];
+        ReferenceBroken = Bodycord_Broken;
+        ReferenceGreen = Bodycord_Green;
+        ReferenceYellow = Bodycord_Yellow;
+        ReferenceOrange = Bodycord_Broken;
         ReferenceShort = 160;
         ReelMode = false;
     }
