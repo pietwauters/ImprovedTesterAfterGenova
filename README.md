@@ -125,7 +125,7 @@ To return to Body Cord Tester mode: short-circuit any bottom socket with socket 
 
 Connect the foil to a body cord plugged into the bottom connection. The tester enters Foil Mode automatically. A green "F" is displayed.
 
-- **Press tip against a non-conductive surface** — measures foil circuit resistance (white square while pressed; 10 ms debounce)
+- **Press tip against a non-conductive surface** — measures foil circuit resistance (white square while pressed)
 - **Press tip against the M5 cap nut** — measures full path from socket to tip
 
 Foil circuit resistance:
