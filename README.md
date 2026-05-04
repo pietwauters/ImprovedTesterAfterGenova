@@ -3,10 +3,13 @@
 **Open source weapon and wire tester for fencing — field-tested at the European Championships.**
 
 This device allows armourers and club officials to test all fencing equipment quickly and reliably: body cords, épées, foils, lamés, guards, and cable reels. It gives clear, colour-coded results based on FIE regulations — no guesswork, no external tools needed.
+<img width="702" height="589" alt="TesterFront" src="https://github.com/user-attachments/assets/07527161-fcef-42ca-a199-ef3feea3df67" />
 
 Unlike cheap continuity testers, this device **measures actual resistance values** and checks for **micro-breaks** — intermittent faults that pass a simple continuity check but cause unreliable scoring on the piste. All results are compared against FIE regulation thresholds and reported with colour-coded feedback.
 
-Built and maintained by a member of the **FIE SEMI Commission** and **EFC SEMI Commission** (the technology commissions of the International Fencing Federation and European Fencing Confederation), and significantly improved after real-world use at the **2024/2025 European Championships in Genova**.
+Built and maintained by a member of the **FIE SEMI Commission** and **EFC SEMI Commission** (the technology commissions of the International Fencing Federation and European Fencing Confederation), and significantly improved after real-world use at the **2024/2025 European Championships in Genova**. Later used in World Cups and Grand Prix:
+
+<img width="250"  alt="TunisTester" src="https://github.com/user-attachments/assets/96af60b4-7b8d-4ef0-b69f-6bfa2e771abd" />
 
 > ⚠️ This is the active development repository. The original version is at [WeaponWireTester](https://github.com/pietwauters/WeaponWireTester) — kept for reference and documentation.
 
