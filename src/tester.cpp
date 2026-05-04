@@ -63,6 +63,11 @@ void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
     EpeeLoop_Yellow = mycalibrator.get_mv_threshold(EpeeLoopThreshold * 2.0f, RLead);
     EpeeLoop_Orange = mycalibrator.get_mv_threshold(EpeeLoopThreshold * 4.0f, RLead);
 
+    // Epee leak thresholds: Even large resistance leaks could lead to issues
+    EpeeLeak = mycalibrator.get_mv_threshold(550, RLead);
+    FoilLeakThreshold = mycalibrator.get_mv_threshold(550, RLead);
+    printf("EpeeLeak threshold = %d\n", EpeeLeak);
+
     // Main wire test (body cord) thresholds (×1, ×2 green/yellow; ×10 broken)
     Bodycord_Green = mycalibrator.get_mv_threshold(BodycordThreshold, RLead);
     Bodycord_Yellow = mycalibrator.get_mv_threshold(BodycordThreshold * 2.0f, RLead);
@@ -595,7 +600,7 @@ void Tester::doEpeeTest() {
 
         // Case 1: Both ArBr and BrCr > ShortDetectThreshold, ArCl > EpeeTipContactThreshold
         // No shorts → measuring return wire (tip not touching probe)
-        if ((arBr > ShortDetectThreshold && brCr > ShortDetectThreshold) && arCl > EpeeTipContactThreshold) {
+        if ((arBr > EpeeLeak && brCr > EpeeLeak) && arCl > EpeeTipContactThreshold) {
             // Show color based on ArCr
 
             // printf("Rac = %.1f\n", mycalibrator.get_resistance_empirical(arCr / 1000.0f));
@@ -631,7 +636,7 @@ void Tester::doEpeeTest() {
         }
         // Case 2: Both ArBr and BrCr > ShortDetectThreshold, ArCl < EpeeTipContactThreshold
         // No shorts → tip touching probe, measuring single wire
-        else if ((arBr > ShortDetectThreshold && brCr > ShortDetectThreshold) && arCl < EpeeTipContactThreshold) {
+        else if ((arBr > EpeeLeak && brCr > EpeeLeak) && arCl < EpeeTipContactThreshold) {
             if (arCl < EpeeTip_Green) {
                 tempColor = LedPanel->m_Green;
             } else if (arCl < EpeeTip_Yellow) {
@@ -663,15 +668,15 @@ void Tester::doEpeeTest() {
             LedPanel->myShow();
         }
         // Case 3: ArBr < ShortDetectThreshold or BrCr < ShortDetectThreshold (unwanted short)
-        else if (arBr < ShortDetectThreshold || brCr < ShortDetectThreshold) {
+        else if (arBr < EpeeLeak || brCr < EpeeLeak) {
             LedPanel->ClearAll();
             Display.initForSingleValue("mass");
-            if (arBr < 1500) {
+            if (arBr < EpeeLeak) {
                 float r = mycalibrator.get_resistance_empirical(arBr / 1000.0f);
                 Display.showSingleValue(r);
                 LedPanel->AnimateArBrConnection();
             }
-            if (brCr < 1500) {
+            if (brCr < EpeeLeak) {
                 float r = mycalibrator.get_resistance_empirical(brCr / 1000.0f);
                 Display.showSingleValue(r);
                 LedPanel->AnimateBrCrConnection();
@@ -759,10 +764,15 @@ void Tester::doFoilTest() {
             LedPanel->Draw_F(LedPanel->m_Orange);
             Display.showSingleValue(r);
             goto loop_end;
+        } else if (arBr < FoilLeakThreshold) {
+            LedPanel->Draw_F(LedPanel->m_Blue);
+            Display.showSingleValue(r);
+            goto loop_end;
         } else {
             // Debounce: measureArBr() > FoilLoop_Orange must be true for 10ms
             bool debounced = true;
             unsigned long start = millis();
+            Display.showSingleValue(r);
             while (millis() - start < 10) {
                 esp_task_wdt_reset();
                 if (Capture_.measureArBr() <= FoilLoop_Orange) {

@@ -21,7 +21,7 @@ typedef enum { Waiting, EpeeTesting, FoilTesting, LameTesting, WireTesting_1, Wi
 typedef enum { SHAPE_F, SHAPE_E, SHAPE_S, SHAPE_P, SHAPE_DIAMOND, SHAPE_SQUARE, SHAPE_R, SHAPE_NONE } Shapes_t;
 
 // Timeout constants
-constexpr int WIRE_TEST_1_TIMEOUT = 2;
+constexpr int WIRE_TEST_1_TIMEOUT = 1;
 constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT = 2;
 constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT_REEL = 7;
 constexpr int FOIL_TEST_TIMEOUT = 1000;
@@ -67,11 +67,13 @@ class Tester {
     int FoilLoop_Green, FoilLoop_Yellow, FoilLoop_Orange;
     // Foil/Epee tip wire (single wire/ArCl)
     int FoilTip_Green, FoilTip_Yellow, FoilTip_Orange;
+    int FoilLeakThreshold;
     int EpeeTip_Green, EpeeTip_Yellow, EpeeTip_Orange;
     // Foil/Epee probe (BrCl) — shared
     int Probe_Green, Probe_Yellow, Probe_Orange;
     // Epee return wire (loop/ArCr)
     int EpeeLoop_Green, EpeeLoop_Yellow, EpeeLoop_Orange;
+    int EpeeLeak;
     // Main wire test (body cord) — normal mode
     int Bodycord_Green, Bodycord_Yellow, Bodycord_Broken;
     // Main wire test — reel mode (×1, ×2, ×5 of ReelBodycordThreshold)

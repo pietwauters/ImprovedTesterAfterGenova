@@ -75,12 +75,15 @@ void DisplayManager::showSingleValue(float r) {
 
     fillRect(CursX, 14, w, h, BLACK);
 
-    if (r < 50.0f) {
+    if (r < 99.0f) {
         if (r < 0.0f)
             r = 0.0f;
         printf("%.1f", lastvalue);
     } else {
-        printf("----");
+        if (r < 999.0f) {
+            printf("%.0f", lastvalue);
+        } else
+            printf("----");
     }
     display();
 }
