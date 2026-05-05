@@ -37,6 +37,9 @@ class DisplayManager : public Adafruit_SSD1306 {
     // Returns a formatted resistance string: "---" if r >= OPEN_RESISTANCE, else "x.x"
     String formatResistance(float r);
 
+    // Converts a UTF-8 string to CP437 encoding for OLED display
+    static String utf8ToCp437(const String& utf8str);
+
    private:
     DisplayManager() : Adafruit_SSD1306(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1) {}
 

@@ -475,7 +475,7 @@ void setup() {
     LoadSettings();
     Display.begin();
 
-    Display.print(deviceName);
+    Display.print(DisplayManager::utf8ToCp437(deviceName));
     Display.printf("\n\n%s", APP_VERSION);
     Display.display();  // flush framebuffer to screen    // Set global log level to ERROR only - suppress INFO logs
                         // from libraries
