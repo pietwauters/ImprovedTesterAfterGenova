@@ -18,7 +18,17 @@
 
 // State enum
 typedef enum { Waiting, EpeeTesting, FoilTesting, LameTesting, WireTesting_1, WireTesting_2, ReelTesting } State_t;
-typedef enum { SHAPE_F, SHAPE_E, SHAPE_S, SHAPE_P, SHAPE_DIAMOND, SHAPE_SQUARE, SHAPE_R, SHAPE_NONE } Shapes_t;
+typedef enum {
+    SHAPE_F,
+    SHAPE_E,
+    SHAPE_S,
+    SHAPE_P,
+    SHAPE_DIAMOND,
+    SHAPE_SQUARE,
+    SHAPE_R,
+    SHAPE_GND,
+    SHAPE_NONE
+} Shapes_t;
 
 // Timeout constants
 constexpr int WIRE_TEST_1_TIMEOUT = 1;
@@ -104,6 +114,7 @@ class Tester {
     bool delayAndTestWirePluggedInLameTestTop(long delay);
     void doEpeeTest();
     void doFoilTest();
+    void doFoilLeakTest();
     void doLameTest();
     void doLameTest_Top();
     void doReelTest();

@@ -493,6 +493,7 @@ void setup() {
             LedPanel->SequenceTest();
         }
     }
+
     // Setup serial terminal first, before other initialization
     setupSerialTerminal();
 

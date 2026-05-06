@@ -66,7 +66,6 @@ void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
     // Epee leak thresholds: Even large resistance leaks could lead to issues
     EpeeLeak = mycalibrator.get_mv_threshold(550, RLead);
     FoilLeakThreshold = mycalibrator.get_mv_threshold(550, RLead);
-    printf("EpeeLeak threshold = %d\n", EpeeLeak);
 
     // Main wire test (body cord) thresholds (×1, ×2 green/yellow; ×10 broken)
     Bodycord_Green = mycalibrator.get_mv_threshold(BodycordThreshold, RLead);
@@ -716,6 +715,9 @@ void Tester::doFoilTest() {
     while (!MeasurementAnalysis::isWirePluggedInFoil(currentMeasurements_)) {
         esp_task_wdt_reset();
         LedPanel->myShow();
+        if (currentMeasurements_.get(Terminal::Cr, Terminal::Cl) < ShortDetectThreshold) {
+            doFoilLeakTest();
+        }
         BrCl = Capture_.measureBrCl();
         if (BrCl < ProbeConnectedThreshold) {  // Probe Mode
             if (SHAPE_P != ShowingShape) {
@@ -769,13 +771,13 @@ void Tester::doFoilTest() {
             Display.showSingleValue(r);
             goto loop_end;
         } else {
-            // Debounce: measureArBr() > FoilLoop_Orange must be true for 10ms
+            // Debounce: measureArBr() > FoilLeakThreshold must be true for 10ms
             bool debounced = true;
             unsigned long start = millis();
             Display.showSingleValue(r);
-            while (millis() - start < 10) {
+            while (millis() - start < 13) {
                 esp_task_wdt_reset();
-                if (Capture_.measureArBr() <= FoilLoop_Orange) {
+                if (Capture_.measureArBr() <= FoilLeakThreshold) {
                     debounced = false;
                     break;
                 }
@@ -808,9 +810,13 @@ void Tester::doFoilTest() {
             LedPanel->myShow();
 
             if (delayAndTestWirePluggedInFoil(1000)) {
-                break;
+                if (currentMeasurements_.get(Terminal::Cr, Terminal::Cl) < FoilLeakThreshold) {
+                    doFoilLeakTest();
+                } else {
+                    break;
+                }
             }
-            if (Capture_.measureArBr() <= ShortDetectThreshold) {
+            if (Capture_.measureArBr() <= FoilLeakThreshold) {
                 LedPanel->ClearAll();
                 LedPanel->myShow();
             }
@@ -823,6 +829,47 @@ void Tester::doFoilTest() {
     LedPanel->ClearAll();
     LedPanel->myShow();
     Display.clear();
+}
+
+void Tester::doFoilLeakTest() {
+    int ArBr;
+    float r;
+    Display.initForSingleValue("leak");
+    if (SHAPE_GND != ShowingShape) {
+        LedPanel->ClearAll();
+        ShowingShape = SHAPE_GND;
+        // Display.initForSingleValue("tip");
+    }
+    LedPanel->Draw_GND(LedPanel->m_Green);
+    LedPanel->myShow();
+
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    while (true) {
+        esp_task_wdt_reset();
+
+        ArBr = Capture_.measureArBr();
+        r = mycalibrator.get_resistance_empirical(ArBr / 1000.0f);
+        Display.showSingleValue(r);
+        if (ArBr < FoilLeakThreshold) {
+            LedPanel->ClearAll();
+            LedPanel->SetInner9(LedPanel->m_Blue);
+            LedPanel->myShow();
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            while (ArBr < FoilLeakThreshold) {
+                esp_task_wdt_reset();
+                ArBr = Capture_.measureArBr();
+                r = mycalibrator.get_resistance_empirical(ArBr / 1000.0f);
+                Display.showSingleValue(r);
+            }
+
+            LedPanel->ClearAll();
+            LedPanel->Draw_GND(LedPanel->m_Green);
+            LedPanel->myShow();
+        }
+        if (Capture_.measureCrCl() < FoilLeakThreshold)
+            break;
+        vTaskDelay(1 / portTICK_PERIOD_MS);
+    }
 }
 
 // Display functions moved to DisplayManager
