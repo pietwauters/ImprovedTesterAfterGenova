@@ -34,6 +34,7 @@ using namespace std;
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include "DisplayManager.h"
 #include "GpioHoldManager.h"
 #include "RTOSUtilities.h"
 #include "USBSerialTerminal.h"
@@ -43,6 +44,9 @@ using namespace std;
 #include "esp_log.h"
 #include "soc/io_mux_reg.h"  // For IO_MUX register definitions
 #include "tester.h"
+
+/*#include "ESP32Button.h"
+ */
 
 void disableRadioForTesting() {
     Serial.println("=== TEMPORARILY DISABLING RADIO FOR TESTING ===");
@@ -74,8 +78,10 @@ int CalibrationDisplayChannel = 0;   // Default to channel 0
 bool CalibrationAutoMode = false;    // Auto mode flag
 int Brightness = BRIGHTNESS_NORMAL;  // Default brightness level
 
+// Below are the threshold values that determine color coding
 // Bodycord thresholds
 float BodycordThreshold = 1.0;
+float ReelBodycordThreshold = 10.0f;  // Green threshold for reel-mode wire test (Ω)
 
 // Foil thresholds
 float FoilSingleWireThreshold = 1.0;
@@ -88,8 +94,25 @@ float EpeeLoopThreshold = 2.0;
 float EpeeMassProbeThreshold = 5.0;
 
 // Lamé thresholds
-float LameThreshold = 1.0;
+float LameThreshold = 5.0f;
+void ResetToFIEThresholds() {
+    // Bodycord thresholds
+    BodycordThreshold = 1.0;
+    ReelBodycordThreshold = 10.0f;
 
+    // Foil thresholds
+    FoilSingleWireThreshold = 1.0;
+    FoilLoopThreshold = 2.0;
+    FoilMassProbeThreshold = 5.0;
+
+    // Epee thresholds
+    EpeeSingleWireThreshold = 1.0;
+    EpeeLoopThreshold = 2.0;
+    EpeeMassProbeThreshold = 5.0;
+
+    // Lamé thresholds
+    LameThreshold = 5.0f;
+}
 AsyncWebServer server(80);
 SettingsManager settings;
 WebTerminal terminal(server);
@@ -178,9 +201,14 @@ void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
 }
 
 // Function to synchronize myRefs_Ohm with StoredRefs_ohm after settings changes
-void synchronizeThresholdValues() {}
+void synchronizeThresholdValues() {
+    if (testerInstance) {
+        testerInstance->UpdateThresholdsWithLeadResistance(testerInstance->getAverageLeadResistance());
+    }
+}
 
 // This function should become part of the calibrationmodule
+/*
 void AdjustThreasholdForRealV() {
     static bool bInitialAdjustmentDone = false;
     static long TimeToTest = 0;
@@ -220,7 +248,7 @@ void AdjustThreasholdForRealV() {
         TimeToTest = millis() + 1000;
     }
 }
-
+*/
 bool CalibrationEnabled;
 
 String deviceName;
@@ -316,7 +344,8 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
 }
 
 void LoadSettings() {
-    // Register settings
+    // Register ALL settings before calling load(), so every setting is
+    // populated from NVS on startup (not just the ones registered first).
 
     settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
     settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
@@ -327,15 +356,6 @@ void LoadSettings() {
     settings.addString("name", "Device Name", &deviceName);
     // settings.addInt("R1_R2", "R1_R2 (total resistance (Ron + 2 x 47)", &R0);
     // settings.addInt("Vmax", "Vmax in mV", &Vmax);
-    settings.begin("Settings");  // for Preferences namespace
-    settings.load();
-    if (!settings.keyExists("ShowWelcome")) {
-        ShowWelcome = true;
-        settings.save();
-    }
-    if (Brightness < 1) {
-        Brightness = BRIGHTNESS_NORMAL;
-    }
 
     settings.addSection("Advanced", "Advanced Settings", 1, true, true);
     settings.addSubsection("WireThresholds", "Thresholds for body cord", "Advanced", 1, true, true);
@@ -347,6 +367,7 @@ void LoadSettings() {
                                    "Only change the defaults if you know what you are doing!");
     // Bodycord thresholds
     settings.addFloat("BodycordThreshold", "Single wire threshold", &BodycordThreshold, "WireThresholds");
+    settings.addFloat("ReelBodycordThreshold", "Reel single wire threshold", &ReelBodycordThreshold, "WireThresholds");
 
     // Foil thresholds
     settings.addFloat("FoilSingleWireThreshold", "Single wire threshold (connector - tip)", &FoilSingleWireThreshold,
@@ -362,6 +383,25 @@ void LoadSettings() {
 
     // Lame thresholds
     settings.addFloat("LameThreshold", "Lamé threshold", &LameThreshold, "LameThresholds");
+
+    settings.addButton(
+        "reset_fie", "Reset to FIE",
+        []() {
+            ResetToFIEThresholds();
+            settings.save();  // persist the reset values to NVS
+        },
+        "Advanced");
+
+    // Now load — all settings are registered so every value is restored from NVS
+    settings.begin("Settings");  // for Preferences namespace
+    settings.load();
+    if (!settings.keyExists("ShowWelcome")) {
+        ShowWelcome = true;
+        settings.save();
+    }
+    if (Brightness < 1) {
+        Brightness = BRIGHTNESS_NORMAL;
+    }
 }
 
 void SetupNetworkStuff() {
@@ -430,11 +470,16 @@ void setup() {
     // put your setup code here, to run once:
     setCpuFrequencyMhz(240);  // Set CPU frequency to 240 MHz
     Serial.begin(115200);
-
-    // Set global log level to ERROR only - suppress INFO logs from libraries
     esp_log_level_set("*", ESP_LOG_ERROR);
 
     LoadSettings();
+    Display.begin();
+
+    Display.print(DisplayManager::utf8ToCp437(deviceName));
+    Display.printf("\n\n%s", APP_VERSION);
+    Display.display();  // flush framebuffer to screen    // Set global log level to ERROR only - suppress INFO logs
+                        // from libraries
+
     LedPanel = new WS2812B_LedMatrix();
     LedPanel->setMirrorMode(MirrorMode);
     LedPanel->begin();
@@ -448,6 +493,7 @@ void setup() {
             LedPanel->SequenceTest();
         }
     }
+
     // Setup serial terminal first, before other initialization
     setupSerialTerminal();
 

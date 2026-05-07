@@ -118,7 +118,7 @@ EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::read_
     return result;
 }
 
-float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measured) {
+float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measured) const {
     if (v_gpio <= 0 || r1_r2 <= 0) {
         return -1.0f;  // Not calibrated
     }
@@ -144,14 +144,21 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
 
     // Quadratic formula: R = (-b ± sqrt(b^2 - 4ac)) / (2a)
     // Note: a = (v_diff - v_gpio) is always negative since v_diff < v_gpio
-    float discriminant = b * b - 4 * a * c;
+    float discriminant = b * b - 4.0f * a * c;
     if (discriminant < 0) {
         return -1.0f;  // No real solution
     }
 
     float sqrt_discriminant = sqrtf(discriminant);
+    /*
     float r1 = (-b + sqrt_discriminant) / (2 * a);
     float r2 = (-b - sqrt_discriminant) / (2 * a);
+*/
+
+    // Numerically stable solution
+    float q = -0.5f * (b + (b > 0 ? sqrt_discriminant : -sqrt_discriminant));
+    float r1 = q / a;
+    float r2 = c / q;
 
     // Choose the positive solution
     // Since a < 0, when dividing by 2a, signs flip
@@ -215,7 +222,37 @@ uint32_t EmpiricalResistorCalibrator::get_adc_threshold_for_resistance_with_lead
     return (uint32_t)(raw_diff > 0 ? raw_diff : 0);  // Ensure non-negative result
 }
 
-float EmpiricalResistorCalibrator::calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction) {
+void EmpiricalResistorCalibrator::print_roundtrip_diagnostics(float lead_ohm) {
+    const float test_R[] = {1.0f, 2.0f, 3.0f, 5.0f, 10.0f, 20.0f, 25.0f, 30.0f, 50.0f};
+    const int n = (int)(sizeof(test_R) / sizeof(test_R[0]));
+
+    printf("\n=== Threshold Roundtrip Diagnostics (lead=%.2f Ohm) ===\n", lead_ohm);
+    printf("  R(Ohm) | thresh_mV | roundtrip_R | error_Ohm\n");
+    printf("  -------+-----------+-------------+----------\n");
+
+    // thresh_mV   : get_mv_threshold() — same unit as getDifferentialSample()
+    // roundtrip_R : thresh_mV/1000 -> get_resistance_empirical() — should recover R exactly
+    // error_Ohm   : roundtrip_R - R — should be ~0.00
+    for (int i = 0; i < n; i++) {
+        float R = test_R[i];
+        int thresh_mV = get_mv_threshold(R, lead_ohm);
+        float roundtrip = get_resistance_empirical((float)thresh_mV / 1000.0f) - lead_ohm;
+        printf("  %6.1f | %9d | %11.4f | %+.4f\n", R, thresh_mV, roundtrip, roundtrip - R);
+    }
+
+    printf("\n  All errors should be ~0.00 Ohm (units now match).\n");
+    printf("=== End Roundtrip Diagnostics ===\n\n");
+}
+
+int EmpiricalResistorCalibrator::get_mv_threshold(float resistance_ohm, float lead_ohm) const {
+    float total_R = resistance_ohm + lead_ohm;
+    if (total_R <= 0.001f)
+        return 0;
+    return (int)(calculate_model_voltage(total_R, v_gpio, r1_r2, correction) * 1000.0f);
+}
+
+float EmpiricalResistorCalibrator::calculate_model_voltage(float R_known, float v_gpio, float r1_r2,
+                                                           float correction) const {
     if (R_known <= 0.001f)  // Use small threshold instead of exact zero to avoid division issues
         return 0.0f;
     return v_gpio * R_known / (R_known + r1_r2 + correction / R_known);
@@ -242,6 +279,7 @@ int EmpiricalResistorCalibrator::voltage_to_adc_raw(float voltage) {
 
 // Helper function to convert voltage back to resistance using empirical model
 // Solves: V_diff = V_gpio * R / (R + R1_R2 + correction/R) for R
+/*
 float EmpiricalResistorCalibrator::voltage_to_resistance(float v_diff, float v_gpio, float r1_r2, float correction) {
     if (v_diff <= 0 || v_gpio <= 0)
         return -1.0f;
@@ -277,82 +315,69 @@ float EmpiricalResistorCalibrator::voltage_to_resistance(float v_diff, float v_g
 
     return -1.0f;  // No valid solution
 }
-
-// Helper function for weighted slope optimization using voltage errors weighted for relative accuracy
-float EmpiricalResistorCalibrator::optimize_slope_weighted(float* R_values, float* V_diff_values, int num_points,
-                                                           float v_gpio_open) {
-    float best_r1_r2 = 100.0f;
-    float best_error = 1e10f;
-
-    // Sweep R1_R2 from 70 to 200 ohms
-    for (float r1_r2_test = 70.0f; r1_r2_test <= 200.0f; r1_r2_test += 1.0f) {
-        float weighted_error = 0.0f;
-        float total_weight = 0.0f;
-
-        for (int i = 0; i < num_points; i++) {
-            // Calculate predicted voltage with correction = 0 for slope optimization
-            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_test, 0.0f);
-
-            // Calculate voltage error
-            float voltage_error = V_predicted - V_diff_values[i];
-
-            // Weight by 1/R to emphasize relative accuracy (smaller R = higher weight)
-            // This makes voltage errors on low resistances count more
-            // float weight = 1.0f / (R_values[i] + 1.0f);  // +1 to avoid division by zero
-
-            // Weight by R to emphasize relative accuracy (smaller R = higher weight)
-            // This makes voltage errors on low resistances count more
-            float weight = (R_values[i]);  //
-            weighted_error += weight * voltage_error * voltage_error;
-            total_weight += weight;
-        }
-
-        if (total_weight > 0) {
-            weighted_error /= total_weight;
-            if (weighted_error < best_error) {
-                best_error = weighted_error;
-                best_r1_r2 = r1_r2_test;
-            }
+*/
+// Golden section search: finds the minimum of a unimodal function on [a, b] to within tol.
+// Converges in ~log(tol/(b-a)) / log(0.618) evaluations — far fewer than a linear sweep.
+template <typename CostFn>
+static float golden_min(CostFn cost, float a, float b, float tol = 0.05f) {
+    constexpr float phi = 0.6180339887f;  // (sqrt(5)-1)/2
+    float c = b - phi * (b - a);
+    float d = a + phi * (b - a);
+    float fc = cost(c), fd = cost(d);
+    while (b - a > tol) {
+        if (fc < fd) {
+            b = d;
+            d = c;
+            fd = fc;
+            c = b - phi * (b - a);
+            fc = cost(c);
+        } else {
+            a = c;
+            c = d;
+            fc = fd;
+            d = a + phi * (b - a);
+            fd = cost(d);
         }
     }
-
-    return best_r1_r2;
+    return 0.5f * (a + b);
 }
 
-// Helper function for correction factor sweep optimization using relative resistance errors
-float EmpiricalResistorCalibrator::optimize_correction_sweep(float* R_values, float* V_diff_values, int num_points,
-                                                             float v_gpio_open, float r1_r2_fixed) {
-    float best_correction = 0.0f;
-    float best_error = 1e10f;
-
-    // Sweep correction from 0 to 150
-    for (float correction_test = -100.0f; correction_test <= 150.0f; correction_test += 1.0f) {
-        float weighted_error = 0.0f;
-        float total_weight = 0.0f;
-
+// Helper function for weighted slope optimization using relative errors
+// Uses hybrid weighting to balance accuracy across the full resistance range
+float EmpiricalResistorCalibrator::optimize_slope_weighted(float* R_values, float* V_diff_values, int num_points,
+                                                           float v_gpio_open) {
+    auto cost = [&](float r1_r2_test) {
+        float weighted_error = 0.0f, total_weight = 0.0f;
         for (int i = 0; i < num_points; i++) {
-            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_fixed, correction_test);
-
-            // Calculate voltage error
-            float voltage_error = V_predicted - V_diff_values[i];
-
-            // Weight by 1/R to emphasize relative accuracy (smaller R = higher weight)
-            float weight = 1.0f / (R_values[i] + 1.0f);  // +1 to avoid division by zero
-
-            weighted_error += weight * voltage_error * voltage_error;
+            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_test, this->correction);
+            float relative_error = (V_predicted - V_diff_values[i]) / V_diff_values[i];
+            // Hybrid weighting: bias toward high R where R1_R2 has most effect
+            float weight = R_values[i] + 0.5f / (R_values[i] + 0.1f);
+            weighted_error += weight * relative_error * relative_error;
             total_weight += weight;
         }
+        return total_weight > 0 ? weighted_error / total_weight : 1e10f;
+    };
+    return golden_min(cost, 70.0f, 200.0f);
+}
 
-        if (total_weight > 0) {
-            weighted_error /= total_weight;
-            if (weighted_error < best_error) {
-                best_error = weighted_error;
-                best_correction = correction_test;
-            }
+// Helper function for correction factor sweep optimization using relative errors
+// Emphasizes low R values where correction term has maximum effect
+float EmpiricalResistorCalibrator::optimize_correction_sweep(float* R_values, float* V_diff_values, int num_points,
+                                                             float v_gpio_open, float r1_r2_fixed) {
+    auto cost = [&](float correction_test) {
+        float weighted_error = 0.0f, total_weight = 0.0f;
+        for (int i = 0; i < num_points; i++) {
+            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_fixed, correction_test);
+            float relative_error = (V_predicted - V_diff_values[i]) / V_diff_values[i];
+            // Inverse weighting: emphasize low R where Correction/R term dominates
+            float weight = 1.0f / (R_values[i] + 0.1f);
+            weighted_error += weight * relative_error * relative_error;
+            total_weight += weight;
         }
-    }
-
-    return best_correction;
+        return total_weight > 0 ? weighted_error / total_weight : 1e10f;
+    };
+    return golden_min(cost, -100.0f, 150.0f);
 }
 
 // Helper function to show calibration quality metrics
@@ -588,32 +613,58 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
 
     printf("Collected %d calibration points.\n\n", num_points);
 
-    // Step 2: Optimize slope (R1_R2) using weighted least squares
-    printf("=== STEP 2: SLOPE OPTIMIZATION (R1_R2) ===\n");
-    printf("Optimizing slope using larger resistance values...\n");
+    // Step 2: Iterative optimization to handle parameter coupling
+    printf("=== STEP 2: ITERATIVE PARAMETER OPTIMIZATION ===\n");
+    printf("Using iterative refinement to find optimal parameters...\n\n");
 
-    float best_r1_r2 = optimize_slope_weighted(R_values, V_diff_values, num_points, v_gpio_open);
+    // Initialize with reasonable starting values
+    this->v_gpio = v_gpio_open;
+    this->r1_r2 = 100.0f;     // Initial guess
+    this->correction = 0.0f;  // Start with no correction
 
-    printf("Optimal R1_R2 = %.1f Ω\n\n", best_r1_r2);
+    float best_r1_r2 = this->r1_r2;
+    float best_correction = this->correction;
 
-    // Step 3: Optimize correction factor by sweeping
-    printf("=== STEP 3: CORRECTION OPTIMIZATION ===\n");
-    printf("Sweeping correction factor to minimize error...\n");
+    // Iterate to refine both parameters (handles coupling between R1_R2 and Correction)
+    const int max_iterations = 10;
+    for (int iter = 0; iter < max_iterations; iter++) {
+        printf("Iteration %d:\n", iter + 1);
 
-    float best_correction = optimize_correction_sweep(R_values, V_diff_values, num_points, v_gpio_open, best_r1_r2);
+        // Optimize R1_R2 with current correction value
+        best_r1_r2 = optimize_slope_weighted(R_values, V_diff_values, num_points, v_gpio_open);
+        this->r1_r2 = best_r1_r2;
+        printf("  R1_R2 = %.1f Ω\n", best_r1_r2);
 
-    printf("Optimal Correction = %.1f Ω²\n\n", best_correction);
+        // Optimize Correction with updated R1_R2 value
+        best_correction = optimize_correction_sweep(R_values, V_diff_values, num_points, v_gpio_open, best_r1_r2);
+        this->correction = best_correction;
+        printf("  Correction = %.1f Ω²\n", best_correction);
 
-    // Step 4: Show preliminary results with quality metrics
-    printf("=== STEP 4: PRELIMINARY RESULTS ===\n");
+        // Show iteration quality
+        float rms_error = 0.0f;
+        for (int i = 0; i < num_points; i++) {
+            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, best_r1_r2, best_correction);
+            float error = (V_predicted - V_diff_values[i]) * 1000.0f;
+            rms_error += error * error;
+        }
+        rms_error = sqrt(rms_error / num_points);
+        printf("  RMS Error = %.2f mV\n\n", rms_error);
+    }
+
+    printf("Final optimized parameters:\n");
+    printf("  R1_R2 = %.1f Ω\n", best_r1_r2);
+    printf("  Correction = %.1f Ω²\n\n", best_correction);
+
+    // Step 3: Show preliminary results with quality metrics
+    printf("=== STEP 3: PRELIMINARY RESULTS ===\n");
     this->v_gpio = v_gpio_open;
     this->r1_r2 = best_r1_r2;
     this->correction = best_correction;
 
     show_calibration_quality(R_values, V_diff_values, num_points);
 
-    // Step 5: Interactive fine-tuning
-    printf("\n=== STEP 5: INTERACTIVE FINE-TUNING ===\n");
+    // Step 4: Interactive fine-tuning
+    printf("\n=== STEP 4: INTERACTIVE FINE-TUNING ===\n");
     printf("You can now manually adjust parameters for better fit.\n");
     printf("Commands: 'r' adjust R1_R2, 'c' adjust correction, 's' show results, 'q' finish\n\n");
 

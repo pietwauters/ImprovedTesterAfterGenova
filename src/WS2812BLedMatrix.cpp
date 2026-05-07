@@ -375,6 +375,17 @@ void WS2812B_LedMatrix::Draw_F(uint32_t theColor) {
     }
     m_pixels->show();
 }
+#ifdef CONFIG_15_20
+uint8_t Symbol_GND[] = {2, 7, 8, 14, 13, 12, 11, 10, 17, 18, 22};
+#else
+uint8_t Symbol_GND[] = {15, 16, 17, 18, 19, 10, 9, 17, 12};
+#endif
+void WS2812B_LedMatrix::Draw_GND(uint32_t theColor) {
+    for (int i = 0; i < sizeof(Symbol_GND); i++) {
+        m_pixels->setPixelColor(m_transformFunc(Symbol_GND[i]), theColor);
+    }
+    m_pixels->show();
+}
 
 void WS2812B_LedMatrix::ConfigureBlinking(int PixelNr, uint32_t theColor, int OnTime, int OffTime, int Repeat) {
     m_BlinkingPixel = PixelNr;  // -1 means no blinking

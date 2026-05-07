@@ -64,26 +64,28 @@ void SettingsManager::load() {
     for (auto& s : settings) {
         String key = getPrefKey(s.key);
 
+        // Use the variable's current value as the default so code-level
+        // defaults are preserved when a key has never been saved to NVS.
         if (s.type == BOOL)
-            *(bool*)s.value = prefs.getBool(key.c_str(), false);
+            *(bool*)s.value = prefs.getBool(key.c_str(), *(bool*)s.value);
         else if (s.type == INT)
-            *(int*)s.value = prefs.getInt(key.c_str(), 0);
+            *(int*)s.value = prefs.getInt(key.c_str(), *(int*)s.value);
         else if (s.type == FLOAT)
-            *(float*)s.value = prefs.getFloat(key.c_str(), 0.0f);
+            *(float*)s.value = prefs.getFloat(key.c_str(), *(float*)s.value);
         else if (s.type == STRING)
-            *(String*)s.value = prefs.getString(key.c_str(), "");
+            *(String*)s.value = prefs.getString(key.c_str(), *(String*)s.value);
 
         else if (s.type == ARRAY_INT) {
             int* arr = (int*)s.value;
             for (size_t i = 0; i < s.size; i++) {
                 String indexedKey = getPrefKey(s.key + "_" + String(i));
-                arr[i] = prefs.getInt(indexedKey.c_str(), 0);
+                arr[i] = prefs.getInt(indexedKey.c_str(), arr[i]);
             }
         } else if (s.type == ARRAY_FLOAT) {
             float* arr = (float*)s.value;
             for (size_t i = 0; i < s.size; i++) {
                 String indexedKey = getPrefKey(s.key + "_" + String(i));
-                arr[i] = prefs.getFloat(indexedKey.c_str(), 0.0f);
+                arr[i] = prefs.getFloat(indexedKey.c_str(), arr[i]);
             }
         }
     }
@@ -193,6 +195,38 @@ String SettingsManager::makeHashedKey(const String& base, size_t index) {
 // This code focuses on storage and key handling as requested.
 
 void SettingsManager::setPostSaveCallback(std::function<void()> callback) { postSaveCallback = callback; }
+
+void SettingsManager::addButton(const char* id, const char* label, std::function<void()> callback,
+                                const char* sectionId) {
+    Button btn;
+    btn.id = String(id);
+    btn.label = String(label);
+    btn.sectionId = sectionId ? String(sectionId) : String("");
+    btn.callback = callback;
+    buttons.push_back(btn);
+}
+
+String SettingsManager::generateButtonHTML(const Button& btn) {
+    // Post to /settings with a hidden _btn field so the single statically-
+    // registered POST handler picks it up — no dynamic server.on() needed.
+    String js =
+        "var f=document.createElement('form');"
+        "f.method='POST';"
+        "f.action='/settings';"
+        "var h=document.createElement('input');"
+        "h.type='hidden';h.name='_btn';h.value='" +
+        btn.id +
+        "';"
+        "f.appendChild(h);"
+        "document.body.appendChild(f);"
+        "f.submit();";
+    String html = "<div class='setting-item button-item'>";
+    html += "<button type='button' class='action-btn' onclick=\"" + js + "\">";
+    html += btn.label;
+    html += "</button>";
+    html += "</div>";
+    return html;
+}
 
 // Section Management Methods
 void SettingsManager::addSection(const char* id, const char* title, int order, bool collapsible, bool startCollapsed) {
@@ -596,6 +630,25 @@ void SettingsManager::addWebEndpoints(AsyncWebServer& server) {
           font-size: 0.9em;
           color: #666;
         }
+        
+        .action-btn {
+          padding: 8px 16px;
+          font-size: 0.95rem;
+          background-color: #007bff;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: background-color 0.2s;
+        }
+        
+        .action-btn:hover {
+          background-color: #0056b3;
+        }
+        
+        .button-item {
+          padding: 8px 0;
+        }
       </style>
       <script>
         function toggleSection(sectionId) {
@@ -684,6 +737,14 @@ void SettingsManager::addWebEndpoints(AsyncWebServer& server) {
                 html += generateSettingHTML(s);
             }
 
+            // Add buttons for this section
+            for (const auto& btn : buttons) {
+                String btnSection = btn.sectionId;
+                if (btnSection == sectionId || (btnSection.isEmpty() && sectionId == "general")) {
+                    html += generateButtonHTML(btn);
+                }
+            }
+
             // Add subsections
             for (const auto& subsection : sortedSections) {
                 if (subsection.parentId == sectionId) {
@@ -723,6 +784,13 @@ void SettingsManager::addWebEndpoints(AsyncWebServer& server) {
                         html += generateSettingHTML(s);
                     }
 
+                    // Add buttons for this subsection
+                    for (const auto& btn : buttons) {
+                        if (btn.sectionId == subsection.id) {
+                            html += generateButtonHTML(btn);
+                        }
+                    }
+
                     html += "</div>";  // Close subsection-content
                     html += "</div>";  // Close subsection
                 }
@@ -739,6 +807,20 @@ void SettingsManager::addWebEndpoints(AsyncWebServer& server) {
     });
 
     server.on("/settings", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        // Check if this POST is a button action rather than a settings save
+        if (request->hasParam("_btn", true)) {
+            String btnId = request->getParam("_btn", true)->value();
+            for (auto& btn : buttons) {
+                if (btn.id == btnId) {
+                    if (btn.callback)
+                        btn.callback();
+                    break;
+                }
+            }
+            request->redirect("/settings");
+            return;
+        }
+
         for (auto& s : settings) {
             // Skip read-only settings
             if (s.readonly)

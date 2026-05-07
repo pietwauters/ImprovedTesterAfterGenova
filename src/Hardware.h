@@ -6,6 +6,7 @@
 #define piste_analog ADC1_CHANNEL_6
 #define cr_analog ADC1_CHANNEL_7
 #define br_analog ADC1_CHANNEL_4
+#define ar_analog ADC1_CHANNEL_5
 
 #define al_driver 33
 #define bl_driver 21
