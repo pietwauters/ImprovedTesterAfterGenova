@@ -72,6 +72,14 @@ void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
     Bodycord_Yellow = mycalibrator.get_mv_threshold(BodycordThreshold * 2.0f, RLead);
     Bodycord_Broken = mycalibrator.get_mv_threshold(BodycordThreshold * 10.0f, RLead);
 
+    // Reel mode thresholds: use same as bodycord for now
+    Reel_Green = mycalibrator.get_mv_threshold(ReelBodycordThreshold, RLead);
+    ;
+    Reel_Yellow = mycalibrator.get_mv_threshold(ReelBodycordThreshold * 2.0f, RLead);
+    ;
+    Reel_Broken = mycalibrator.get_mv_threshold(ReelBodycordThreshold * 5.0f, RLead);
+    ;
+
     // mycalibrator.print_roundtrip_diagnostics(RLead);
 }
 
@@ -334,8 +342,8 @@ void Tester::handleWireTestingState1() {
                 leadresistances[i] = mycalibrator.get_resistance_empirical(measurementValue / 1000.0f);
 
                 AverageLeadResistance += leadresistances[i];
-                printf("Resistance lead[%d] = %.2f Ohm\n", i, leadresistances[i]);
-                fflush(stdout);                 // Force flush
+                // printf("Resistance lead[%d] = %.2f Ohm\n", i, leadresistances[i]);
+                // fflush(stdout);                 // Force flush
                 vTaskDelay(pdMS_TO_TICKS(10));  // Small delay
             }
             if (AverageLeadResistance > 0.0f) {
@@ -343,7 +351,7 @@ void Tester::handleWireTestingState1() {
             } else {
                 AverageLeadResistance = 0.0f;
             }
-            printf("Average lead resistance = %f & setting blue\n", AverageLeadResistance);
+            // printf("Average lead resistance = %f & setting blue\n", AverageLeadResistance);
             LedPanel->SetBlinkColor(LedPanel->m_Blue);
         }
         ledPanel->myShow();

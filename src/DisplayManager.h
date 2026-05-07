@@ -12,7 +12,7 @@
 class DisplayManager : public Adafruit_SSD1306 {
    public:
     // Resistance above this threshold is displayed as "---"
-    static constexpr float OPEN_RESISTANCE = 50.0f;
+    static constexpr float OPEN_RESISTANCE = 999.99f;
 
     // Singleton access
     static DisplayManager& instance() {
