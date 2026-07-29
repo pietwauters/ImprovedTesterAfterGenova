@@ -74,6 +74,7 @@ bool MirrorMode = true;  // Default to no mirror mode
 bool IgnoreCalibrationWarning = false;
 bool ShowWelcome = true;
 bool LowPowerMode = false;
+bool EnableFoilLeakTest = false;
 int CalibrationDisplayChannel = 0;   // Default to channel 0
 bool CalibrationAutoMode = false;    // Auto mode flag
 int Brightness = BRIGHTNESS_NORMAL;  // Default brightness level
@@ -352,6 +353,8 @@ void LoadSettings() {
     settings.addBool("IgnoreCalibrationWarning", "Ignore warning to Calibrate?", &IgnoreCalibrationWarning);
     settings.addBool("ShowWelcome", "Show welcome lights (for debugging)?", &ShowWelcome);
     settings.addBool("LowPowerMode", "Apply low power settings (slightly lower response times)", &LowPowerMode);
+    settings.addBool("EnableFoilLeakTest", "Enable foil tip leaktest (expert)", &EnableFoilLeakTest);
+
     settings.addInt("Brightness", "Display brightness 1-255", &Brightness);
     settings.addString("name", "Device Name", &deviceName);
     // settings.addInt("R1_R2", "R1_R2 (total resistance (Ron + 2 x 47)", &R0);

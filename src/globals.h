@@ -6,6 +6,7 @@
 // External variables that need to be shared
 extern bool DoCalibration;
 extern bool LowPowerMode;
+extern bool EnableFoilLeakTest;
 extern WS2812B_LedMatrix* LedPanel;
 extern int myRefs_Ohm[];  // Correct type: int array
 extern int StoredRefs_ohm[];

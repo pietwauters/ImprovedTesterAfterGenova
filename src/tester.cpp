@@ -229,11 +229,12 @@ void Tester::handleWaitingState() {
         }
 #endif
         // Check for special test modes
+        if ((currentMeasurements_.get(Terminal::Cr, Terminal::Cl) < Ohm_20) &&
+            (currentMeasurements_.get(Terminal::Ar, Terminal::Al) > 160) &&
+            (currentMeasurements_.get(Terminal::Br, Terminal::Bl) > 160)) {
+            UpdateThresholdsWithLeadResistance(AverageLeadResistance);
+            doLameTest_Top();
 
-        if (currentMeasurements_.get(Terminal::Ar, Terminal::Cr) < Ohm_20) {
-            currentState = EpeeTesting;
-            UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
-            doEpeeTest();
             doCommonReturnFromSpecialMode();
             lastSpecialTestExit = millis();
         } else if (currentMeasurements_.get(Terminal::Ar, Terminal::Br) < Ohm_20) {
@@ -249,12 +250,10 @@ void Tester::handleWaitingState() {
 
             doCommonReturnFromSpecialMode();
             lastSpecialTestExit = millis();
-        } else if ((currentMeasurements_.get(Terminal::Cr, Terminal::Cl) < Ohm_20) &&
-                   (currentMeasurements_.get(Terminal::Ar, Terminal::Al) > 160) &&
-                   (currentMeasurements_.get(Terminal::Br, Terminal::Bl) > 160)) {
-            UpdateThresholdsWithLeadResistance(AverageLeadResistance);
-            doLameTest_Top();
-
+        } else if (currentMeasurements_.get(Terminal::Ar, Terminal::Cr) < Ohm_20) {
+            currentState = EpeeTesting;
+            UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
+            doEpeeTest();
             doCommonReturnFromSpecialMode();
             lastSpecialTestExit = millis();
         } else if (currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
@@ -840,6 +839,9 @@ void Tester::doFoilTest() {
 }
 
 void Tester::doFoilLeakTest() {
+    if (!EnableFoilLeakTest) {
+        return;
+    }
     int ArBr;
     float r;
     Display.initForSingleValue("leak");
@@ -863,7 +865,9 @@ void Tester::doFoilLeakTest() {
             LedPanel->SetInner9(LedPanel->m_Blue);
             LedPanel->myShow();
             vTaskDelay(1000 / portTICK_PERIOD_MS);
-            while (ArBr < FoilLeakThreshold) {
+            // Ar-Br (the foil cord's own bridge) can stay shorted indefinitely, so bound this wait
+            unsigned long leakTimeoutStart = millis();
+            while (ArBr < FoilLeakThreshold && (millis() - leakTimeoutStart) < 500) {
                 esp_task_wdt_reset();
                 ArBr = Capture_.measureArBr();
                 r = mycalibrator.get_resistance_empirical(ArBr / 1000.0f);
