@@ -1,14 +1,21 @@
 // Copyright (c) Piet Wauters 2022 <piet.wauters@gmail.com>
 #pragma once
-#include <Adafruit_NeoPixel.h>
+#include "Hardware.h"  // HARDWARE_REV guard + revision-specific pins
+#include "NeoPixelRMT.h"
 // #include "SubjectObserverTemplate.h"
-#define CONFIG_15_20 1  // defines how the pins in the bottom row are organized
+// #define CONFIG_15_20 1  // defines how the pins in the bottom row are organized
 // #define MIRROR 1        // Some types of WS1281B LED matrices are mirrored, so the order of the pixels is reversed.
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Which pin on the Arduino is connected to the NeoPixels?
 
+#if HARDWARE_REV == 1
 constexpr int PIN = 26;
+#elif HARDWARE_REV == 2
+// TODO(hw_rev2): set the NeoPixel data pin for the new board. NOTE: GPIO 26 is
+// br_driver on hw_rev2 (see Hardware.h), so this must move to a free pin.
+constexpr int PIN = 16;
+#endif
 constexpr int BUZZERPIN = 22;
 constexpr int RELATIVE_HIGH = HIGH;
 constexpr int RELATIVE_LOW = LOW;
@@ -31,7 +38,7 @@ constexpr uint8_t MASK_WHITE_R = 0x08;
 constexpr uint8_t MASK_GREEN = 0x04;
 constexpr uint8_t MASK_BUZZ = 0x02;
 
-constexpr uint8_t BRIGHTNESS_LOW = 15;
+constexpr uint8_t BRIGHTNESS_LOW = 10;
 constexpr uint8_t BRIGHTNESS_NORMAL = 25;
 constexpr uint8_t BRIGHTNESS_HIGH = 60;
 constexpr uint8_t BRIGHTNESS_ULTRAHIGH = 100;
@@ -104,8 +111,20 @@ class WS2812B_LedMatrix {
     static int transformStandard(int n);
     static int transformMirrored(int n);
 
-    Adafruit_NeoPixel* m_pixels;
-    uint8_t m_Brightness = BRIGHTNESS_NORMAL;
+    // The R/E/F glyph tables (Draw_R, Draw_E, Draw_F) are stored differently
+    // per revision: on hw_rev2 they are explicit LED-chain indices pre-mapped
+    // to that panel and written as-is; on hw_rev1 they still pass through the
+    // active mirror transform.
+    int glyphIndex(int n) {
+#if HARDWARE_REV == 2
+        return n;
+#else
+        return m_transformFunc(n);
+#endif
+    }
+
+    NeoPixelRMT* m_pixels;
+    uint8_t m_Brightness = BRIGHTNESS_LOW;
     bool m_Loudness = true;
     int animationspeed = 60;
     QueueHandle_t queue = NULL;

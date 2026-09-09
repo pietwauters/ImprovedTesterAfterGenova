@@ -91,13 +91,12 @@ int getDifferentialSample(adc1_channel_t pin1, adc1_channel_t pin2, int nr_sampl
 }
 
 void init_AD() {
-    gpio_set_drive_capability(GPIO_NUM_33, GPIO_DRIVE_CAP_3);  // 40 mA
-    gpio_set_drive_capability(GPIO_NUM_21, GPIO_DRIVE_CAP_3);  // 40 mA
-    gpio_set_drive_capability(GPIO_NUM_23, GPIO_DRIVE_CAP_3);  // 40 mA
-    gpio_set_drive_capability(GPIO_NUM_25, GPIO_DRIVE_CAP_3);  // 40 mA
-    gpio_set_drive_capability(GPIO_NUM_5, GPIO_DRIVE_CAP_3);   // 40 mA
-    gpio_set_drive_capability(GPIO_NUM_18, GPIO_DRIVE_CAP_3);  // 40 mA
-    gpio_set_drive_capability(GPIO_NUM_19, GPIO_DRIVE_CAP_3);  // 40 mA
+    // Boost drive strength to 40 mA on every terminal driver pin. Iterate the
+    // driverpins[] table so this tracks the per-revision pin map in Hardware.h
+    // instead of hard-coding GPIO numbers.
+    for (uint8_t pin : driverpins) {
+        gpio_set_drive_capability(static_cast<gpio_num_t>(pin), GPIO_DRIVE_CAP_3);
+    }
 
     Set_IODirectionAndValue(IODirection_ar_bl, IOValues_ar_bl);
     adc1_config_width(ADC_WIDTH_BIT_12);

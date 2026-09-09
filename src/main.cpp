@@ -36,6 +36,7 @@ using namespace std;
 
 #include "DisplayManager.h"
 #include "GpioHoldManager.h"
+#include "Hardware.h"  // HARDWARE_REV_STR
 #include "RTOSUtilities.h"
 #include "USBSerialTerminal.h"
 #include "adc_calibrator.h"
@@ -75,9 +76,9 @@ bool IgnoreCalibrationWarning = false;
 bool ShowWelcome = true;
 bool LowPowerMode = false;
 bool EnableFoilLeakTest = false;
-int CalibrationDisplayChannel = 0;   // Default to channel 0
-bool CalibrationAutoMode = false;    // Auto mode flag
-int Brightness = BRIGHTNESS_NORMAL;  // Default brightness level
+int CalibrationDisplayChannel = 0;  // Default to channel 0
+bool CalibrationAutoMode = false;   // Auto mode flag
+int Brightness = BRIGHTNESS_LOW;    // Default brightness level
 
 // Below are the threshold values that determine color coding
 // Bodycord thresholds
@@ -407,9 +408,29 @@ void LoadSettings() {
     }
 }
 
+// --- WiFi bring-up policy -----------------------------------------------------
+// The AP's current draw stacks onto charge current + LED current during boot and
+// can push the MCP73871's 500 mA USB input limit into oscillation (brownout).
+// So: bring WiFi up only after the welcome sequence + calibration have run, and
+// at minimal TX power.
+#ifndef WIFI_START_DELAY_MS
+#define WIFI_START_DELAY_MS \
+    20000  // ms after boot before the AP comes up (bump if it still browns out during calibration)
+#endif
+#ifndef WIFI_TX_POWER
+#define WIFI_TX_POWER WIFI_POWER_MINUS_1dBm  // absolute minimum; raise (e.g. WIFI_POWER_5dBm) if the AP is unreachable
+#endif
+static uint32_t g_wifiStartAt = 0;  // 0 = never start WiFi (e.g. deep-sleep wake)
+static bool g_wifiStarted = false;
+
 void SetupNetworkStuff() {
+    // Don't let WiFi mode changes write the driver config to NVS/flash. The
+    // flash write stalls both cores for several ms; combined with WiFiPowerManager
+    // tearing WiFi down on timeout, that used to corrupt an in-flight LED frame.
+    WiFi.persistent(false);
     WiFi.mode(WIFI_AP);
     WiFi.softAP("Tester", "01041967");
+    WiFi.setTxPower(WIFI_TX_POWER);  // minimal - keep the AP's current draw low
 
     // Setup ElegantOTA with callbacks for WiFi power management
     ElegantOTA.begin(&server);
@@ -436,6 +457,10 @@ void SetupNetworkStuff() {
 
     // Initialize WiFi Power Manager after WiFi setup
     wifiPowerManager().begin();
+
+    g_wifiStarted = true;
+    Serial.printf("[WiFi] AP up at TX power level %d (%lu ms after boot)\n", (int)WIFI_TX_POWER,
+                  (unsigned long)millis());
 }
 
 void setupSerialTerminal() {
@@ -475,11 +500,19 @@ void setup() {
     Serial.begin(115200);
     esp_log_level_set("*", ESP_LOG_ERROR);
 
+    // Early, unmissable banner so you can confirm the flashed binary matches the
+    // board in front of you before anything else runs.
+    delay(50);
+    Serial.printf("\n\n==================================================\n");
+    Serial.printf("  Improved Tester   fw %s\n", APP_VERSION);
+    Serial.printf("  HARDWARE REVISION: %s   (env hw_rev%s)\n", HARDWARE_REV_STR, HARDWARE_REV_STR);
+    Serial.printf("==================================================\n\n");
+
     LoadSettings();
     Display.begin();
 
     Display.print(DisplayManager::utf8ToCp437(deviceName));
-    Display.printf("\n\n%s", APP_VERSION);
+    Display.printf("\n\n%s hw%s", APP_VERSION, HARDWARE_REV_STR);
     Display.display();  // flush framebuffer to screen    // Set global log level to ERROR only - suppress INFO logs
                         // from libraries
 
@@ -503,7 +536,8 @@ void setup() {
     esp_task_wdt_init(20, true);
     esp_task_wdt_add(NULL);
     Serial.printf("CPU Freq: %d MHz\n", getCpuFrequencyMhz());
-    printf("App version: %s\n", APP_VERSION);
+    Serial.printf("Arduino setup()/loop() running on core %d (expect 0)\n", xPortGetCoreID());
+    printf("App version: %s   Hardware rev: %s\n", APP_VERSION, HARDWARE_REV_STR);
     init_AD();
     Set_IODirectionAndValue(IODirection_br_bl, IOValues_br_bl);
 
@@ -518,7 +552,9 @@ void setup() {
     esp_task_wdt_delete(xTaskGetIdleTaskHandleForCPU(1));
 
     if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED) {
-        SetupNetworkStuff();
+        // Defer the actual AP bring-up to loop(), WIFI_START_DELAY_MS from now,
+        // so it lands after the welcome sequence and calibration.
+        g_wifiStartAt = millis() + WIFI_START_DELAY_MS;
     }
     //  Explicitly disable Wifi and Bluetooth
     // disableRadioForTesting();
@@ -531,6 +567,15 @@ void loop() {
     // Always run serial terminal
     serialTerminal.loop();
     esp_task_wdt_reset();
+
+    if (!g_wifiStarted) {
+        // Deferred AP bring-up (see WIFI_START_DELAY_MS). Nothing network-side
+        // exists yet, so don't touch the other handlers.
+        if (g_wifiStartAt != 0 && (int32_t)(millis() - g_wifiStartAt) >= 0) {
+            SetupNetworkStuff();
+        }
+        return;
+    }
 
     // Run WiFi power management
     wifiPowerManager().loop();

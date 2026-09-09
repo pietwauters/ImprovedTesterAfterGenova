@@ -30,7 +30,7 @@ WS2812B_LedMatrix::WS2812B_LedMatrix() {
     digitalWrite(PIN, LOW);
     pinMode(BUZZERPIN, OUTPUT);
     digitalWrite(BUZZERPIN, RELATIVE_LOW);
-    m_pixels = new Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
+    m_pixels = new NeoPixelRMT(NUMPIXELS, (gpio_num_t)PIN);
     SetBrightness(BRIGHTNESS_NORMAL);
     // Default to standard transform
     m_transformFunc = transformStandard;
@@ -49,14 +49,14 @@ void WS2812B_LedMatrix::begin() {
 void WS2812B_LedMatrix::SetBrightness(uint8_t val) {
     m_Brightness = val;
     m_pixels->setBrightness(m_Brightness);
-    m_Red = Adafruit_NeoPixel::Color(255, 0, 0, m_Brightness);
-    m_Green = Adafruit_NeoPixel::Color(0, 255, 0, m_Brightness);
-    m_White = Adafruit_NeoPixel::Color(200, 200, 200, m_Brightness);
-    m_Orange = Adafruit_NeoPixel::Color(255, 70, 0, m_Brightness);
-    m_Yellow = Adafruit_NeoPixel::Color(255, 251, 0, m_Brightness);
-    m_Blue = Adafruit_NeoPixel::Color(0, 0, 255, m_Brightness);
-    m_Purple = Adafruit_NeoPixel::Color(105, 0, 200, m_Brightness);
-    m_Off = Adafruit_NeoPixel::Color(0, 0, 0, m_Brightness);
+    m_Red = NeoPixelRMT::Color(255, 0, 0, m_Brightness);
+    m_Green = NeoPixelRMT::Color(0, 255, 0, m_Brightness);
+    m_White = NeoPixelRMT::Color(200, 200, 200, m_Brightness);
+    m_Orange = NeoPixelRMT::Color(255, 70, 0, m_Brightness);
+    m_Yellow = NeoPixelRMT::Color(255, 251, 0, m_Brightness);
+    m_Blue = NeoPixelRMT::Color(0, 0, 255, m_Brightness);
+    m_Purple = NeoPixelRMT::Color(105, 0, 200, m_Brightness);
+    m_Off = NeoPixelRMT::Color(0, 0, 0, m_Brightness);
 }
 
 WS2812B_LedMatrix::~WS2812B_LedMatrix() {
@@ -334,10 +334,22 @@ void WS2812B_LedMatrix::Draw_C(uint32_t theColor) {
     }
     m_pixels->show();
 }
+// R / E / F glyph tables. On hw_rev2 these are explicit LED-chain indices in
+// the code's row-major snake order (0-4 across the top, 9-5 back across row 2,
+// 10-14 across row 3, ...), pre-mapped to that panel and written straight to
+// the pixels via glyphIndex() (no mirror transform). On hw_rev1 the historical
+// tables are kept and still pass through m_transformFunc.
+#if HARDWARE_REV == 2
+// #####  /  #.#..  /  #.#..  /  .#.##
+uint8_t Letter_R[] = {0, 1, 2, 3, 4, 7, 9, 10, 12, 15, 16, 18};
+#elif defined(CONFIG_15_20)
+uint8_t Letter_R[] = {0, 1, 2, 3, 4, 7, 9, 10, 12, 15, 16, 18};
+#else
 uint8_t Letter_R[] = {0, 1, 2, 3, 4, 5, 7, 12, 14, 16, 18, 19};
+#endif
 void WS2812B_LedMatrix::Draw_R(uint32_t theColor) {
-    for (int i = 0; i < sizeof(Letter_R); i++) {
-        m_pixels->setPixelColor(m_transformFunc(Letter_R[i]), theColor);
+    for (unsigned i = 0; i < sizeof(Letter_R); i++) {
+        m_pixels->setPixelColor(glyphIndex(Letter_R[i]), theColor);
     }
     m_pixels->show();
 }
@@ -351,27 +363,33 @@ void WS2812B_LedMatrix::DrawDiamond(uint32_t theColor) {
     m_pixels->show();
 }
 
-#ifdef CONFIG_15_20
+#if HARDWARE_REV == 2
+// #####  /  #.#.#  /  #.#.#  /  #...#
+uint8_t Letter_E[] = {0, 1, 2, 3, 4, 5, 7, 9, 10, 12, 14, 15, 19};
+#elif defined(CONFIG_15_20)
 uint8_t Letter_E[] = {0, 1, 2, 3, 4, 5, 7, 9, 10, 12, 14, 15, 19};
 #else
 uint8_t Letter_E[] = {20, 21, 22, 23, 24, 19, 10, 9, 17, 12, 15, 14, 5};
 #endif
 
 void WS2812B_LedMatrix::Draw_E(uint32_t theColor) {
-    for (int i = 0; i < 13; i++) {
-        m_pixels->setPixelColor(m_transformFunc(Letter_E[i]), theColor);
+    for (unsigned i = 0; i < sizeof(Letter_E); i++) {
+        m_pixels->setPixelColor(glyphIndex(Letter_E[i]), theColor);
     }
     m_pixels->show();
 }
 
-#ifdef CONFIG_15_20
-uint8_t Letter_F[] = {5, 6, 7, 8, 9, 12, 14, 15, 17};
+#if HARDWARE_REV == 2
+// .....  /  #####  /  #.#..  /  #....
+uint8_t Letter_F[] = {5, 6, 7, 8, 9, 10, 12, 19};
+#elif defined(CONFIG_15_20)
+uint8_t Letter_F[] = {5, 6, 7, 8, 9, 10, 12, 17, 19};
 #else
 uint8_t Letter_F[] = {15, 16, 17, 18, 19, 10, 9, 17, 12};
 #endif
 void WS2812B_LedMatrix::Draw_F(uint32_t theColor) {
-    for (int i = 0; i < 9; i++) {
-        m_pixels->setPixelColor(m_transformFunc(Letter_F[i]), theColor);
+    for (unsigned i = 0; i < sizeof(Letter_F); i++) {
+        m_pixels->setPixelColor(glyphIndex(Letter_F[i]), theColor);
     }
     m_pixels->show();
 }

@@ -163,6 +163,7 @@ void Tester::testerTaskWrapper(void* parameter) {
 void Tester::taskLoop() {
     // Add watchdog for this task
     esp_task_wdt_add(NULL);
+    printf("TesterTask running on core %d (expect 1)\n", xPortGetCoreID());
 
     while (true) {
         esp_task_wdt_reset();

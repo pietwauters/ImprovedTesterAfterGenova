@@ -19,10 +19,14 @@ def after_build(source, target, env):
     bootloader_bin = os.path.join(project_dir, "bootloader", "bootloader.bin")
     partition_bin = os.path.join(project_dir, "partition_table", "partition-table.bin")
 
+    # Hardware-revision tag (env name), so OTA binaries are self-labeling and
+    # can't be confused between boards.
+    hw_tag = env["PIOENV"]
+
     # Timestamp for filenames
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    ota_bin_out = os.path.join(ota_dir, f"firmware_{timestamp}.bin")
-    merged_bin_out = os.path.join(ota_dir, f"merged_firmware_{timestamp}.bin")
+    ota_bin_out = os.path.join(ota_dir, f"firmware_{hw_tag}_{timestamp}.bin")
+    merged_bin_out = os.path.join(ota_dir, f"merged_firmware_{hw_tag}_{timestamp}.bin")
 
     print(f"📦 Timestamp: {timestamp}")
     print(f"📄 App binary: {app_bin}")

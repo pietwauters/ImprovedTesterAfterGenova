@@ -2,12 +2,21 @@
 
 #include <Adafruit_SSD1306.h>
 #include <Arduino.h>
+
+#include "Hardware.h"  // HARDWARE_REV guard + revision-specific pins
 // Define the OLED display dimensions
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 32  // Adjust for your display's size
-// Define custom I2C pins
+// Define custom I2C pins (revision specific)
+#if HARDWARE_REV == 1
 #define SDA_PIN 17
 #define SCL_PIN 16
+#elif HARDWARE_REV == 2
+// TODO(hw_rev2): update the OLED I2C pins for the new board. Currently an exact
+// copy of hw_rev1 — change only if they actually differ on the new hardware.
+#define SDA_PIN 17  // unchanged
+#define SCL_PIN 4   // was 16
+#endif
 
 class DisplayManager : public Adafruit_SSD1306 {
    public:

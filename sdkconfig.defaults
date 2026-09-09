@@ -1,4 +1,10 @@
 CONFIG_FREERTOS_HZ=1000
+# loop()/WiFi bring-up/AsyncWebServer/ElegantOTA all run from the Arduino loop
+# task. Keep it off core 1 so it can't starve TesterTask, which is explicitly
+# pinned to core 1 (xTaskCreatePinnedToCore(..., 1) in tester.cpp) - this is
+# also what the ESP_TIMER_TASK_CORE=1 build flag's "isolated from WiFi/lwIP"
+# comment already assumed was true.
+CONFIG_ARDUINO_RUNNING_CORE=0
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_LOG_DEFAULT_LEVEL_ERROR=y
 CONFIG_LOG_MAXIMUM_LEVEL_ERROR=y
