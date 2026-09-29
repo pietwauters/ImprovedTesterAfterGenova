@@ -127,6 +127,19 @@ Ohm-based pass/fail colour thresholds.
 - `DisplayManager` (`Display`) — abstracts the 5×5 WS2812B LED matrix
   (`WS2812BLedMatrix`) and, on the Pro variant, an OLED (Adafruit SSD1306)
   showing exact resistance values.
+- **LED panel layout — read `docs/LED_PANEL_LAYOUT.md` before touching any LED
+  table.** All drawing is in *user view* (`u = row*5 + col`, 0 = top-left, as
+  the fencer sees it); glyphs are 5-row bitmaps. The physical chain order is one
+  runtime setting, `LedLayout` = `<corner of LED 0>-<V|H>[-P]` (e.g. `BL-V`,
+  hw_rev3 default `BR-V`), which covers every panel rotation/mirroring. Never
+  write `m_pixels->setPixelColor()` directly; go through `setUserPixel()`
+  (glyphs) or `setWirePixel()` (wire content). Wire content is additionally
+  mirrored by the per-board constant `LED_WIRE0_ON_LEFT` (true on hw_rev3),
+  which follows the physical jack order. If glyphs are wrong, fix `LedLayout`;
+  if only the wire order is wrong, fix `LED_WIRE0_ON_LEFT`.
+  Terminal command `ledtest [layout]` verifies a panel. This replaced
+  `MirrorMode`, `CONFIG_15_20` and the per-panel `glyphIndex()` tables
+  (2026-09-29).
 - `WiFiPowerManager` / `DeepSleepHandler` / `RTCMemoryStorage` — battery/power
   management; device deep-sleeps after inactivity and restores lead-resistance
   calibration from RTC memory on wake.

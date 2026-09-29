@@ -71,7 +71,7 @@ int StoredRefs_ohm[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
 int Vmax = 2992;
 volatile bool DoCalibration = false;
-bool MirrorMode = true;  // Default to no mirror mode
+String LedLayout = LED_LAYOUT_DEFAULT;  // LED panel layout, see docs/LED_PANEL_LAYOUT.md
 bool IgnoreCalibrationWarning = false;
 bool ShowWelcome = true;
 bool LowPowerMode = false;
@@ -131,6 +131,7 @@ void handleHelpCommand(ITerminal* term, const std::vector<String>& args);
 void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args);
 void handleListCommand(ITerminal* term, const std::vector<String>& args);  // Add this
 void handleSetCommand(ITerminal* term, const std::vector<String>& args);   // Add this
+void handleLedTestCommand(ITerminal* term, const std::vector<String>& args);
 
 // Command handler class declaration
 class CommonCommandHandler {
@@ -143,6 +144,7 @@ class CommonCommandHandler {
         terminal->registerCommand("list", handleListCommand);
         terminal->registerCommand("set", handleSetCommand);
         terminal->registerCommand("help", handleHelpCommand);
+        terminal->registerCommand("ledtest", handleLedTestCommand);
     }
 };
 
@@ -266,9 +268,9 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
     term->printf("  IgnoreCalibrationWarning          : %s (Ignore warning that Calibration is needed?)\n",
                  IgnoreCalibrationWarning ? "true" : "false");
 
-    term->printf("  MirrorMode          : %s (Should your LedPanel be mirrored?)\n", MirrorMode ? "true" : "false");
-
     term->printf("\nString settings:\n");
+    term->printf("  LedLayout           : %s (LED panel: corner of LED 0 + first direction, e.g. BL-V)\n",
+                 LedLayout.c_str());
     term->printf("  name                : %s (Device Name)\n", deviceName.c_str());
 
     term->printf("\nNote: Use the web interface to modify these settings\n");
@@ -277,7 +279,7 @@ void handleListCommand(ITerminal* term, const std::vector<String>& args) {
 void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
     if (args.size() < 2) {
         term->printf("Usage: set <setting_name> <value>\n");
-        term->printf("Available settings: bCalibrate, IgnoreCalibrationWarning,MirrorMode, Brightness, name\n");
+        term->printf("Available settings: bCalibrate, IgnoreCalibrationWarning, LedLayout, Brightness, name\n");
         term->printf("Example: set name \"MyTester\"\n");
         // term->printf("Example: set myRefs_Ohm 0,1,2,3,4,5,6,7,8,9,12\n");
         return;
@@ -300,17 +302,6 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
 
         // Boolean settings
     } else if (settingName == "bCalibrate") {
-    } else if (settingName == "MirrorMode") {
-        if (value == "true" || value == "1") {
-            MirrorMode = true;
-            term->printf("✓ Set MirrorMode = true\n");
-        } else if (value == "false" || value == "0") {
-            MirrorMode = false;
-            term->printf("✓ Set MirrorMode = false\n");
-        } else {
-            term->printf("Error: MirrorMode must be 'true' or 'false'\n");
-            return;
-        }
         if (value == "true" || value == "1") {
             CalibrationEnabled = true;
             term->printf("✓ Set bCalibrate = true\n");
@@ -323,6 +314,15 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
         }
 
         // String settings
+    } else if (settingName == "LedLayout") {
+        if (!WS2812B_LedMatrix::isValidLayout(value)) {
+            term->printf("Error: LedLayout must be <corner>-<direction>[-P], corner BL/BR/TL/TR, direction V/H\n");
+            term->printf("       e.g. BL-V = LED 0 bottom-left, first run going up. Try it first with: ledtest BL-V\n");
+            return;
+        }
+        LedPanel->setLayout(value);
+        LedLayout = LedPanel->getLayout();  // normalized (upper case)
+        term->printf("✓ Set LedLayout = %s\n", LedLayout.c_str());
     } else if (settingName == "name") {
         // Remove quotes if present
         if (value.startsWith("\"") && value.endsWith("\"")) {
@@ -334,7 +334,7 @@ void handleSetCommand(ITerminal* term, const std::vector<String>& args) {
         // Array settings
     } else {
         term->printf("Error: Unknown setting '%s'\n", settingName.c_str());
-        term->printf("Available:  R0, Vmax, bCalibrate, MirrorMode, Brightness, name\n");
+        term->printf("Available:  R0, Vmax, bCalibrate, LedLayout, Brightness, name\n");
         return;
     }
 
@@ -349,7 +349,6 @@ void LoadSettings() {
     // Register ALL settings before calling load(), so every setting is
     // populated from NVS on startup (not just the ones registered first).
 
-    settings.addBool("MirrorMode", "Should your LedPanel be mirrored?", &MirrorMode);
     settings.addBool("bCalibrate", "Perform Calibration?", &CalibrationEnabled);
     settings.addBool("IgnoreCalibrationWarning", "Ignore warning to Calibrate?", &IgnoreCalibrationWarning);
     settings.addBool("ShowWelcome", "Show welcome lights (for debugging)?", &ShowWelcome);
@@ -358,6 +357,7 @@ void LoadSettings() {
 
     settings.addInt("Brightness", "Display brightness 1-255", &Brightness);
     settings.addString("name", "Device Name", &deviceName);
+    settings.addString("LedLayout", "LED panel layout: corner of LED 0 + first direction (BL-V, BR-H, ...)", &LedLayout);
     // settings.addInt("R1_R2", "R1_R2 (total resistance (Ron + 2 x 47)", &R0);
     // settings.addInt("Vmax", "Vmax in mV", &Vmax);
 
@@ -491,12 +491,44 @@ void handleHelpCommand(ITerminal* term, const std::vector<String>& args) {
     term->send("  calibrate            - Start calibration");
     term->send("  list                 - Show available settings");
     term->send("  set <name> <value>   - Change a setting");
+    term->send("  ledtest [layout]     - Check the LED panel layout (upright F = correct)");
     term->send("  help                 - Show this help message");
+}
+
+// ledtest          : draw the layout test pattern with the current LedLayout
+// ledtest <layout> : preview another layout (not saved; use 'set LedLayout')
+void handleLedTestCommand(ITerminal* term, const std::vector<String>& args) {
+    String previous = LedPanel->getLayout();
+    if (!args.empty()) {
+        if (!LedPanel->setLayout(args[0])) {
+            term->printf("Error: '%s' is not a valid layout (e.g. BL-V, BR-H, TL-V-P)\n", args[0].c_str());
+            return;
+        }
+    }
+    String tested = LedPanel->getLayout();
+    term->printf("Layout %s: the F should be upright and readable (green).\n", tested.c_str());
+    term->printf("Red = chain LED #0, orange = LED #1 -> they show the start corner and first direction.\n");
+    LedPanel->LayoutTest();
+    delay(5000);
+    LedPanel->setLayout(previous);  // preview only
+    LedPanel->ClearAll();
+    if (tested != previous) {
+        term->printf("Not saved. If this one was right: set LedLayout %s\n", tested.c_str());
+    }
 }
 
 void setup() {
     // put your setup code here, to run once:
     setCpuFrequencyMhz(240);  // Set CPU frequency to 240 MHz
+#if HARDWARE_REV == 3
+    gpio_reset_pin(BOOST_EN);
+    gpio_set_direction(BOOST_EN, GPIO_MODE_OUTPUT);
+    gpio_set_level(BOOST_EN, 1);  // 1 = HIGH, 0 = LOW
+    delay(50);
+    gpio_reset_pin(PWRLed);
+    gpio_set_direction(PWRLed, GPIO_MODE_OUTPUT);
+    gpio_set_level(PWRLed, 1);  // 1 = HIGH, 0 = LOW
+#endif
     Serial.begin(115200);
     esp_log_level_set("*", ESP_LOG_ERROR);
 
@@ -517,7 +549,12 @@ void setup() {
                         // from libraries
 
     LedPanel = new WS2812B_LedMatrix();
-    LedPanel->setMirrorMode(MirrorMode);
+    if (!LedPanel->setLayout(LedLayout)) {
+        Serial.printf("Invalid LedLayout '%s' in settings, using default %s\n", LedLayout.c_str(),
+                      LED_LAYOUT_DEFAULT);
+        LedLayout = LED_LAYOUT_DEFAULT;
+        LedPanel->setLayout(LedLayout);
+    }
     LedPanel->begin();
     LedPanel->ClearAll();
 

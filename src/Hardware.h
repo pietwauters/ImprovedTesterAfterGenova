@@ -5,13 +5,14 @@
 // =============================================================================
 // HARDWARE_REV is set by the PlatformIO env (see platformio.ini):
 //   -e hw_rev1  ->  HARDWARE_REV == 1   (original tester board)
-//   -e hw_rev2  ->  HARDWARE_REV == 2   (new tester board)
+//   -e hw_rev2  ->  HARDWARE_REV == 2   (second tester board)
+//   -e hw_rev3  ->  HARDWARE_REV == 3   (third tester board)
 //
 // Building without picking an env (or with an unknown value) is a hard error,
 // so a firmware binary always corresponds to exactly one hardware revision.
 // =============================================================================
 #if !defined(HARDWARE_REV)
-#error "HARDWARE_REV is not set - build with 'pio run -e hw_rev1' or '-e hw_rev2'"
+#error "HARDWARE_REV is not set - build with 'pio run -e hw_rev1', '-e hw_rev2' or '-e hw_rev3'"
 #endif
 
 // Pin and ADC channel definitions (revision specific)
@@ -56,8 +57,34 @@
 #define cr_driver 27     // was 18
 #define piste_driver 14  // was 19 — now shared with al_driver
 
+#elif HARDWARE_REV == 3
+
+// TODO(hw_rev3): update the values below for the new board. This block is
+// currently an exact copy of hw_rev2 - change only the pins/channels that
+// actually differ on the new hardware.
+#define cl_analog ADC1_CHANNEL_0
+#define bl_analog ADC1_CHANNEL_3
+#define piste_analog ADC1_CHANNEL_6
+#define cr_analog ADC1_CHANNEL_7
+#define br_analog ADC1_CHANNEL_4
+#define ar_analog ADC1_CHANNEL_5
+
+#define al_driver 14     // rev1: 33
+// GPIO12 is a boot strapping pin (MTDI / flash-voltage select). Safe here
+// because it is only driven after boot and floats low at reset; a warm reset
+// while this pin is driven high through a connected cord could wedge the
+// bootloader. Burn the 3.3V flash-voltage eFuse if that is ever observed.
+#define bl_driver 15     // rev1: 21
+#define cl_driver 13     // rev1: 23
+#define ar_driver 25     // rev1: 25
+#define br_driver 26     // rev1: 5
+#define cr_driver 27     // rev1: 18
+#define piste_driver 14  // rev1: 19 — shared with al_driver
+#define PWRLed GPIO_NUM_19
+#define BOOST_EN GPIO_NUM_21
+
 #else
-#error "Unsupported HARDWARE_REV value (expected 1 or 2)"
+#error "Unsupported HARDWARE_REV value (expected 1, 2 or 3)"
 #endif
 
 // Printable hardware-revision string, e.g. for the OLED / serial banner.

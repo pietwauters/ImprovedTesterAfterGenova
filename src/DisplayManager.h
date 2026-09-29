@@ -16,6 +16,10 @@
 // copy of hw_rev1 — change only if they actually differ on the new hardware.
 #define SDA_PIN 17  // unchanged
 #define SCL_PIN 4   // was 16
+#elif HARDWARE_REV == 3
+// TODO(hw_rev3): OLED I2C pins, copied from hw_rev2.
+#define SDA_PIN 17
+#define SCL_PIN 4
 #endif
 
 class DisplayManager : public Adafruit_SSD1306 {
