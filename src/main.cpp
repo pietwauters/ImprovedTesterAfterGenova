@@ -35,6 +35,7 @@ using namespace std;
 #include <freertos/task.h>
 
 #include "DisplayManager.h"
+#include "DeepSleepHandler.h"
 #include "GpioHoldManager.h"
 #include "Hardware.h"  // HARDWARE_REV_STR
 #include "RTOSUtilities.h"
@@ -76,6 +77,7 @@ bool IgnoreCalibrationWarning = false;
 bool ShowWelcome = true;
 bool LowPowerMode = false;
 bool EnableFoilLeakTest = false;
+int SpecialModeSleepTimeout = 60;  // s without a connection in epee/foil/lame mode before deep sleep
 int CalibrationDisplayChannel = 0;  // Default to channel 0
 bool CalibrationAutoMode = false;   // Auto mode flag
 int Brightness = BRIGHTNESS_LOW;    // Default brightness level
@@ -354,6 +356,9 @@ void LoadSettings() {
     settings.addBool("ShowWelcome", "Show welcome lights (for debugging)?", &ShowWelcome);
     settings.addBool("LowPowerMode", "Apply low power settings (slightly lower response times)", &LowPowerMode);
     settings.addBool("EnableFoilLeakTest", "Enable foil tip leaktest (expert)", &EnableFoilLeakTest);
+    settings.addInt("SpecialModeSleepTimeout",
+                    "Seconds with nothing connected in epee/foil/lame mode before sleep (0 = never, needs LowPowerMode)",
+                    &SpecialModeSleepTimeout);
 
     settings.addInt("Brightness", "Display brightness 1-255", &Brightness);
     settings.addString("name", "Device Name", &deviceName);
@@ -520,6 +525,11 @@ void handleLedTestCommand(ITerminal* term, const std::vector<String>& args) {
 void setup() {
     // put your setup code here, to run once:
     setCpuFrequencyMhz(240);  // Set CPU frequency to 240 MHz
+    // Pins held through deep sleep (drivers, BOOST_EN, PWRLed) ignore any new
+    // configuration until released
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_UNDEFINED) {
+        DeepSleepHandler::releaseAllHolds();
+    }
 #if HARDWARE_REV == 3
     gpio_reset_pin(BOOST_EN);
     gpio_set_direction(BOOST_EN, GPIO_MODE_OUTPUT);

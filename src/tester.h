@@ -37,6 +37,7 @@ constexpr int NO_WIRES_PLUGGED_IN_TIMEOUT_REEL = 7;
 constexpr int FOIL_TEST_TIMEOUT = 1000;
 constexpr int WIRE_TEST_DELAY = 2000;  // 2 seconds delay after special test exit
 constexpr int LOOP_DELAY_IN_WIRETESTING1 = 400;
+constexpr unsigned long SLEEP_GRACE_AFTER_WAKE_MS = 10000;  // stay awake this long once back in Waiting
 
 class Tester {
    private:
@@ -50,6 +51,8 @@ class Tester {
 
     DeepSleepHandler myDeepSleepHandler;
     long StartForLowPower;
+    unsigned long lastConnectionSeen_ = 0;    // special modes: last time anything was connected
+    unsigned long lastSpecialModeCheck_ = 0;  // special modes: last connection check
     int WaitingStateCounter;
 
     // Task handle
@@ -107,6 +110,10 @@ class Tester {
     // Private methods
 
     void doCommonReturnFromSpecialMode();
+    void restartSleepGrace();
+    bool enterSleepIfIdle();
+    void startSpecialModeSleepTimer();
+    void checkSpecialModeSleep();
     bool delayAndTestWirePluggedIn(long delay);
     bool delayAndTestWirePluggedInFoil(long delay);
     bool delayAndTestWirePluggedInEpee(long delay);

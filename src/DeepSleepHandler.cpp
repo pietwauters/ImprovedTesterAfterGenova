@@ -25,15 +25,9 @@ bool DeepSleepHandler::isPinInWakeupList(gpio_num_t pin) const {
 }
 
 bool DeepSleepHandler::isGpioHoldCapable(gpio_num_t pin) {
-    // Only these pins support GPIO hold during deep sleep
-    const gpio_num_t holdCapablePins[] = {GPIO_NUM_0,  GPIO_NUM_2,  GPIO_NUM_4,  GPIO_NUM_12, GPIO_NUM_13, GPIO_NUM_14,
-                                          GPIO_NUM_15, GPIO_NUM_25, GPIO_NUM_26, GPIO_NUM_27, GPIO_NUM_32, GPIO_NUM_33};
-
-    for (const auto& holdPin : holdCapablePins) {
-        if (pin == holdPin)
-            return true;
-    }
-    return false;
+    // Every output-capable pad can be held, RTC pads via the RTC hold and digital
+    // pads via gpio_deep_sleep_hold_en(). GPIO6-11 are the SPI flash.
+    return GPIO_IS_VALID_OUTPUT_GPIO(pin) && !(pin >= GPIO_NUM_6 && pin <= GPIO_NUM_11);
 }
 
 void DeepSleepHandler::addHoldPin(gpio_num_t pin, int value) {
@@ -45,7 +39,6 @@ void DeepSleepHandler::addHoldPin(gpio_num_t pin, int value) {
     // Check if pin supports GPIO hold (more restrictive than just RTC-capable)
     if (!isGpioHoldCapable(pin)) {
         Serial.printf("ERROR: Pin %d does NOT support GPIO hold during sleep!\n", pin);
-        Serial.printf("       Hold-capable pins: 0,2,4,12,13,14,15,25,26,27,32,33\n");
         // return; // Do add non-hold-capable pins
     }
 
@@ -61,6 +54,17 @@ void DeepSleepHandler::addHoldPin(gpio_num_t pin, int value) {
     // Add new hold pin
     holdPins.push_back({pin, value});
     Serial.printf("Added hold pin %d with value %d (GPIO hold capable: YES)\n", pin, value);
+}
+
+void DeepSleepHandler::addPulldownPin(gpio_num_t pin) {
+    if (!rtc_gpio_is_valid_gpio(pin)) {
+        Serial.printf("ERROR: Pin %d is not an RTC pin, its pull-down is lost in deep sleep!\n", pin);
+    }
+    for (auto p : pulldownPins) {
+        if (p == pin)
+            return;
+    }
+    pulldownPins.push_back(pin);
 }
 
 void DeepSleepHandler::addWakeupPin(gpio_num_t pin, WakeupTrigger trigger) {
@@ -171,25 +175,33 @@ void DeepSleepHandler::enterDeepSleep() {
             }
         }
     }
-    // Only configure hold pins if there are hold pins configured
-    if (!holdPins.empty()) {
-        // Set all pins to their values, also non-hold-capable pins
+    // Drive the hold pins and pull down the pull-down pins, then latch all of them
+    for (const auto& holdPin : holdPins) {
+        gpio_set_direction(holdPin.pin, GPIO_MODE_OUTPUT);
+        gpio_set_level(holdPin.pin, holdPin.value);
+    }
+    for (auto pin : pulldownPins) {
+        gpio_set_direction(pin, GPIO_MODE_INPUT);
+        gpio_pullup_dis(pin);
+        gpio_pulldown_en(pin);  // routed to the RTC pull-down on RTC pads
+    }
+    if (!pulldownPins.empty()) {
+        // RTC pad pulls only stay active in deep sleep while RTC_PERIPH is powered
+        esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+    }
+    if (!holdPins.empty() || !pulldownPins.empty()) {
+        vTaskDelay(10 / portTICK_PERIOD_MS);
         for (const auto& holdPin : holdPins) {
-            pinMode(holdPin.pin, OUTPUT);
-            digitalWrite(holdPin.pin, holdPin.value);
-        }
-        vTaskDelay(300 / portTICK_PERIOD_MS);
-        // Enable GPIO hold for all hold-capable pins
-        gpio_deep_sleep_hold_en();
-        for (const auto& holdPin : holdPins) {
-            if (rtc_gpio_is_valid_gpio(holdPin.pin)) {
-                gpio_hold_en(holdPin.pin);
-                Serial.printf("GPIO hold enabled for pin %d with value %d\n", holdPin.pin, holdPin.value);
-            } else {
-                Serial.printf("ERROR: Pin %d is not valid for GPIO hold!\n", holdPin.pin);
+            if (gpio_hold_en(holdPin.pin) != ESP_OK) {
+                Serial.printf("ERROR: GPIO hold failed for pin %d\n", holdPin.pin);
             }
         }
-        vTaskDelay(300 / portTICK_PERIOD_MS);
+        for (auto pin : pulldownPins) {
+            if (gpio_hold_en(pin) != ESP_OK) {
+                Serial.printf("ERROR: GPIO hold failed for pin %d\n", pin);
+            }
+        }
+        gpio_deep_sleep_hold_en();  // needed for the digital (non-RTC) pads
     }
 
     esp_task_wdt_deinit();  // <--- Add this line to disable the task WDT    Serial.println("Entering deep sleep...");
@@ -200,13 +212,7 @@ void DeepSleepHandler::enterDeepSleep() {
 void DeepSleepHandler::handleWakeup() {
     Serial.println("Waking up from deep sleep...");
 
-    // Disable all GPIO holds
-    gpio_deep_sleep_hold_dis();
-    for (const auto& holdPin : holdPins) {
-        if (rtc_gpio_is_valid_gpio(holdPin.pin)) {
-            gpio_hold_dis(holdPin.pin);
-        }
-    }
+    releaseAllHolds();
     // Clear scheduled sleep
     sleepScheduled = false;
 }
@@ -214,6 +220,15 @@ void DeepSleepHandler::handleWakeup() {
 bool DeepSleepHandler::isWakeFromSleep() {
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
     return (wakeup_reason != ESP_SLEEP_WAKEUP_UNDEFINED);
+}
+
+void DeepSleepHandler::releaseAllHolds() {
+    gpio_deep_sleep_hold_dis();
+    for (int pin = 0; pin < GPIO_NUM_MAX; pin++) {
+        if (isGpioHoldCapable((gpio_num_t)pin)) {
+            gpio_hold_dis((gpio_num_t)pin);
+        }
+    }
 }
 
 esp_sleep_wakeup_cause_t DeepSleepHandler::getWakeupCause() { return esp_sleep_get_wakeup_cause(); }
@@ -290,5 +305,6 @@ void DeepSleepHandler::printConfiguration() const {
 void DeepSleepHandler::clearAllPins() {
     holdPins.clear();
     wakeupPins.clear();
+    pulldownPins.clear();
     Serial.println("All pin configurations cleared");
 }

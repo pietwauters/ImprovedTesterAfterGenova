@@ -1,12 +1,74 @@
 #include "tester.h"
 
 #include "DisplayManager.h"
+#include "Hardware.h"
+#include "MeasurementHardware.h"
 #include "globals.h"  // For DoCalibration and other globals
 
 // Global instance
 Tester* testerInstance = nullptr;
 
 // OLED is managed by DisplayManager
+
+#if HARDWARE_REV == 3
+// Wake-on-connect deep sleep (hw_rev3 only: every driver pin is an RTC pad).
+// Ar, Bl, Cl are held HIGH. Br, Cr, Al are held as inputs with the internal
+// ~45k pull-down, which pulls their sense node LOW through R1 (the sense pins
+// GPIO34-39 have no pulls of their own). A connection from a HIGH terminal to a
+// pulled-down one lifts that sense pin to ~3.3V and wakes the chip (EXT1
+// ANY_HIGH). This catches body cords, epee (Ar-Cr), foil (Ar-Br), top lame
+// (Cr-Cl) and the reel short (Al-Bl). Bottom lame (Br-Cr) joins two pulled-down
+// terminals and does NOT wake the tester.
+static const uint8_t kSleepHighDrivers[] = {ar_driver, bl_driver, cl_driver};
+static const uint8_t kSleepPulldownDrivers[] = {br_driver, cr_driver, al_driver};
+static const adc1_channel_t kSleepWakeSense[] = {br_analog, cr_analog, piste_analog};
+// A wake sense pin above this while idle means something is connected; sleeping
+// would wake straight away, so stay awake instead. Well below the ~0.75*VDD
+// wake level, so marginal (leaky) connections also keep the tester awake.
+constexpr int kSleepSenseIdleMaxMv = 400;
+
+// Apply the sleep pin configuration while awake and check that all wake sense
+// pins read LOW. The next measurement reconfigures the driver pins again.
+static bool isIdleForWakeOnConnect() {
+    for (uint8_t pin : kSleepHighDrivers) {
+        pinMode(pin, OUTPUT);
+        digitalWrite(pin, HIGH);
+    }
+    for (uint8_t pin : kSleepPulldownDrivers) {
+        pinMode(pin, INPUT_PULLDOWN);
+    }
+    vTaskDelay(5 / portTICK_PERIOD_MS);
+    bool idle = true;
+    for (adc1_channel_t channel : kSleepWakeSense) {
+        int mv = MeasurementHardware::getCalibratedVoltage(adc1_get_raw(channel), channel);
+        if (mv > kSleepSenseIdleMaxMv) {
+            idle = false;
+        }
+    }
+    for (uint8_t pin : kSleepPulldownDrivers) {
+        pinMode(pin, INPUT);  // drop the pull-down, it would load the measurement
+    }
+    return idle;
+}
+
+static void enterWakeOnConnectSleep(DeepSleepHandler& handler) {
+    handler.clearAllPins();
+    for (uint8_t pin : kSleepHighDrivers) {
+        handler.addHoldPin((gpio_num_t)pin, 1);
+    }
+    for (uint8_t pin : kSleepPulldownDrivers) {
+        handler.addPulldownPin((gpio_num_t)pin);
+    }
+    handler.addHoldPin(BOOST_EN, 0);
+    handler.addHoldPin(PWRLed, 0);
+    for (adc1_channel_t channel : kSleepWakeSense) {
+        gpio_num_t gpio;
+        adc1_pad_get_io_num(channel, &gpio);
+        handler.addWakeupPin(gpio, WakeupTrigger::WAKE_HIGH);
+    }
+    handler.enterDeepSleep();
+}
+#endif
 
 Tester::Tester(WS2812B_LedMatrix* ledPanelRef)
     : ledPanel(ledPanelRef),
@@ -125,7 +187,7 @@ void Tester::begin(bool ForceCalibration) {
     if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED) {
         StartForLowPower = millis() + 90000;
     } else {
-        StartForLowPower = 0;
+        restartSleepGrace();
     }
     /*
     long starttime = millis();
@@ -211,6 +273,7 @@ void Tester::handleWaitingState() {
             LedPanel->myShow();
             SetWiretestMode(false);
             vTaskDelay(1000 / portTICK_PERIOD_MS);  // Small delay to prevent watchdog issues
+            restartSleepGrace();
         }
 
     } else {
@@ -221,10 +284,10 @@ void Tester::handleWaitingState() {
                 if (!ledPanel->GetBlinkState()) {
                     LedPanel->ClearAll();
                     LedPanel->myShow();
-                    // Store float value (lead resistance)
-                    rtc.store("LeadR", AverageLeadResistance);
-                    myDeepSleepHandler.enableTimerWakeup(2000000);
-                    myDeepSleepHandler.enterDeepSleep();
+                    if (!enterSleepIfIdle()) {
+                        // Something is plugged in: don't sleep, look again later
+                        StartForLowPower = millis() + 5000;
+                    }
                 }
             }
         }
@@ -260,6 +323,7 @@ void Tester::handleWaitingState() {
         } else if (currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
             UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
             doReelTest();
+            restartSleepGrace();
         }
 
         esp_task_wdt_reset();
@@ -308,6 +372,7 @@ void Tester::handleWireTestingState1() {
         }
         if (!noWireTimeout) {
             currentState = Waiting;
+            restartSleepGrace();
             ShowingShape = SHAPE_NONE;
             Display.setMode("Waiting");
             Display.showMode();
@@ -430,6 +495,7 @@ void Tester::handleWireTestingState2() {
     ledPanel->myShow();
     ShowingShape = SHAPE_NONE;
     currentState = Waiting;
+    restartSleepGrace();
     SetWiretestMode(false);
     Display.setMode("Waiting");
     Display.showMode();
@@ -450,6 +516,76 @@ void Tester::doCommonReturnFromSpecialMode() {
 
     ledPanel->ClearAll();
     Capture_.captureMatrix3x3(currentMeasurements_);
+    restartSleepGrace();
+}
+
+// Enter deep sleep unless something is connected. Does not return when it sleeps.
+bool Tester::enterSleepIfIdle() {
+#if HARDWARE_REV == 3
+    if (!isIdleForWakeOnConnect()) {
+        return false;
+    }
+    rtc.store("LeadR", AverageLeadResistance);
+    enterWakeOnConnectSleep(myDeepSleepHandler);
+#else
+    rtc.store("LeadR", AverageLeadResistance);
+    myDeepSleepHandler.enableTimerWakeup(2000000);
+    myDeepSleepHandler.enterDeepSleep();
+#endif
+    return false;
+}
+
+// Call on entering epee, foil or lame mode: that mode was entered because
+// something is connected.
+void Tester::startSpecialModeSleepTimer() {
+    lastConnectionSeen_ = millis();
+    lastSpecialModeCheck_ = millis();
+}
+
+// Call from the epee/foil/lame loops. About once a second, check all 15 terminal
+// pairs; after SpecialModeSleepTimeout seconds with nothing connected, sleep.
+void Tester::checkSpecialModeSleep() {
+    if (!LowPowerMode || SpecialModeSleepTimeout <= 0) {
+        return;
+    }
+    unsigned long now = millis();
+    if (now - lastSpecialModeCheck_ < 1000) {
+        return;
+    }
+    lastSpecialModeCheck_ = now;
+
+    MeasurementSet all;
+    Capture_.captureAll(all);
+    for (size_t i = 0; i < all.count(); i++) {
+        // abs(): some pairs (e.g. Al-Cl) are captured with reversed polarity and
+        // read about -3100 mV when open
+        if (abs(all[i].millivolts()) < WireConnectedThreshold) {
+            lastConnectionSeen_ = now;
+            return;
+        }
+    }
+    if (now - lastConnectionSeen_ < (unsigned long)SpecialModeSleepTimeout * 1000UL) {
+        return;
+    }
+    if (wifiPowerManager().getSecondsUntilTimeout()) {
+        return;  // WiFi still in use
+    }
+    LedPanel->ClearAll();
+    LedPanel->myShow();
+    Display.clear();
+    if (!enterSleepIfIdle()) {
+        // The wake pins see a connection after all: stay in the mode, start over
+        lastConnectionSeen_ = now;
+        ShowingShape = SHAPE_NONE;  // force the mode loop to redraw
+    }
+}
+
+void Tester::restartSleepGrace() {
+    // Only after a wake from deep sleep; after a power cycle the 90 s start-up
+    // delay and the WiFi timeout decide when to sleep
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_UNDEFINED) {
+        StartForLowPower = millis() + SLEEP_GRACE_AFTER_WAKE_MS;
+    }
 }
 
 bool Tester::delayAndTestWirePluggedIn(long delay) {
@@ -570,6 +706,7 @@ void Tester::doEpeeTest() {
     Capture_.captureMatrix3x3(currentMeasurements_);
     Display.setMode("Epee");
     Display.showMode();
+    startSpecialModeSleepTimer();
 
     while (!MeasurementAnalysis::isWirePluggedInEpee(currentMeasurements_)) {
         esp_task_wdt_reset();
@@ -702,6 +839,7 @@ void Tester::doEpeeTest() {
 
         esp_task_wdt_reset();
     loop_end:
+        checkSpecialModeSleep();
         // Refresh measurements for next iteration
         Capture_.captureMatrix3x3(currentMeasurements_);
     }
@@ -719,6 +857,7 @@ void Tester::doFoilTest() {
     Capture_.captureMatrix3x3(currentMeasurements_);
     Display.setMode("Foil");
     Display.showMode();
+    startSpecialModeSleepTimer();
 
     while (!MeasurementAnalysis::isWirePluggedInFoil(currentMeasurements_)) {
         esp_task_wdt_reset();
@@ -830,6 +969,7 @@ void Tester::doFoilTest() {
             }
         }
     loop_end:
+        checkSpecialModeSleep();
         // Refresh measurements for next iteration
         Capture_.captureMatrix3x3(currentMeasurements_);
     }
@@ -881,6 +1021,7 @@ void Tester::doFoilLeakTest() {
         }
         if (Capture_.measureCrCl() < FoilLeakThreshold)
             break;
+        checkSpecialModeSleep();
         vTaskDelay(1 / portTICK_PERIOD_MS);
     }
 }
@@ -895,6 +1036,7 @@ void Tester::doLameTest() {
 
     // Initial capture before entering loop
     Capture_.captureMatrix3x3(currentMeasurements_);
+    startSpecialModeSleepTimer();
     float r = 0.0f;
     while (!MeasurementAnalysis::isWirePluggedIn(currentMeasurements_)) {
         esp_task_wdt_reset();
@@ -957,6 +1099,7 @@ void Tester::doLameTest() {
         }
 
         esp_task_wdt_reset();
+        checkSpecialModeSleep();
         // Refresh measurements for next iteration
         Capture_.captureMatrix3x3(currentMeasurements_);
     }
@@ -984,6 +1127,7 @@ void Tester::doLameTest_Top() {
     Display.initForSingleValue("lame");
     // Initial capture before entering loop
     Capture_.captureMatrix3x3(currentMeasurements_);
+    startSpecialModeSleepTimer();
 
     while (!MeasurementAnalysis::isWirePluggedInLameTop(currentMeasurements_)) {
         esp_task_wdt_reset();
@@ -1023,6 +1167,7 @@ void Tester::doLameTest_Top() {
         }
 
         esp_task_wdt_reset();
+        checkSpecialModeSleep();
         // Refresh measurements for next iteration
         Capture_.captureMatrix3x3(currentMeasurements_);
     }

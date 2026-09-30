@@ -31,6 +31,7 @@ class DeepSleepHandler {
     std::vector<HoldPin> holdPins;                    // Pins to hold during sleep
     std::vector<WakeupPin> wakeupPins;                // Pins to monitor for wake-up
     std::vector<HighImpedancePin> highImpedancePins;  // NEW: Add this vector
+    std::vector<gpio_num_t> pulldownPins;             // Inputs held with internal pull-down during sleep
     long sleepScheduledTime;                          // When to enter sleep
     bool sleepScheduled;                              // Is sleep scheduled?
     bool timerWakeupEnabled;                          // Is timer wake-up enabled?
@@ -39,7 +40,7 @@ class DeepSleepHandler {
     bool isPinInHoldList(gpio_num_t pin) const;
     bool isPinInWakeupList(gpio_num_t pin) const;
     uint64_t buildWakeupBitmask() const;
-    bool isGpioHoldCapable(gpio_num_t pin);  // Add this line
+    static bool isGpioHoldCapable(gpio_num_t pin);
 
    public:
     // Constructor
@@ -50,6 +51,7 @@ class DeepSleepHandler {
     void setWakeupPins(const std::vector<WakeupPin>& pins);    // Set all wake-up pins at once
     void addWakeupPin(gpio_num_t pin, WakeupTrigger trigger);  // Add single wake-up pin
     void addHighImpedancePin(gpio_num_t pin);                  // NEW: Add method to configure high impedance pins
+    void addPulldownPin(gpio_num_t pin);                       // Input with internal pull-down, held during sleep
 
     // Alternative: Set wake-up pins with bitmask (for compatibility)
     void setWakeupBitmask(uint64_t bitmask, WakeupTrigger trigger = WakeupTrigger::WAKE_HIGH);
@@ -68,6 +70,9 @@ class DeepSleepHandler {
 
     // Wake-up handling
     static bool isWakeFromSleep();
+    // Release every GPIO hold left over from deep sleep. Call early after a
+    // wake-up, before reconfiguring any pin: a held pad ignores new settings.
+    static void releaseAllHolds();
     static esp_sleep_wakeup_cause_t getWakeupCause();
     void handleWakeup();
 
