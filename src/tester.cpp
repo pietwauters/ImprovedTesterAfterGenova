@@ -526,9 +526,11 @@ bool Tester::enterSleepIfIdle() {
         return false;
     }
     rtc.store("LeadR", AverageLeadResistance);
+    Display.sleep();
     enterWakeOnConnectSleep(myDeepSleepHandler);
 #else
     rtc.store("LeadR", AverageLeadResistance);
+    Display.sleep();
     myDeepSleepHandler.enableTimerWakeup(2000000);
     myDeepSleepHandler.enterDeepSleep();
 #endif

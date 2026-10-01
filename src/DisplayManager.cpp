@@ -156,6 +156,14 @@ void DisplayManager::begin() {
     // showMode();
 }
 
+void DisplayManager::sleep() {
+    if (!initialized)
+        return;
+    ssd1306_command(SSD1306_DISPLAYOFF);
+    ssd1306_command(SSD1306_CHARGEPUMP);
+    ssd1306_command(0x10);  // disable charge pump
+}
+
 constexpr int R_X = 0;
 constexpr int R_Y = 15;
 constexpr int R_X_Subscript = R_X + 12;

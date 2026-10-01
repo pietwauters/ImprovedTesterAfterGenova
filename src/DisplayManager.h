@@ -44,6 +44,8 @@ class DisplayManager : public Adafruit_SSD1306 {
     void showWiretesting1();
     void showWiretesting1Values(float r1, float r2, float r3);
     void clear();
+    // Display off + charge pump off (~µA standby); begin() turns it back on after wake
+    void sleep();
     void setMode(const char* _mode) { strncpy(mode, _mode, 15); }
     // Prints text at the current cursor position and draws a 1-px underline below it
     void printUnderlined(const char* text);
