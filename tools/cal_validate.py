@@ -51,6 +51,14 @@ CONNECTIONS = [
     ("Al-Bl", 3, "mode detection only"),
 ]
 USE = {name: use for name, _, use in CONNECTIONS}
+# Physical end points, for firmware that does not report them yet (same as src/CalibrationPaths.h)
+ENDS = {
+    "Cl-Cr": ["A top", "A bottom"], "Al-Ar": ["B top", "B bottom"], "Bl-Br": ["C top", "C bottom"],
+    "Ar-Cr": ["B bottom", "A bottom"], "Ar-Br": ["B bottom", "C bottom"], "Br-Cr": ["C bottom", "A bottom"],
+    "Ar-Cl": ["B bottom", "A top"], "Br-Cl": ["C bottom", "A top"], "Cr-Al": ["A bottom", "B top"],
+    "Cr-Bl": ["A bottom", "C top"], "Ar-Bl": ["B bottom", "C top"], "Br-Al": ["C bottom", "B top"],
+    "Cl-Al": ["A top", "B top"], "Cl-Bl": ["A top", "C top"], "Al-Bl": ["B top", "C top"],
+}
 
 READINGS_PER_WINDOW = 12 * 32  # tester averaging window: 12 readings of 32 measurements
 MAX_CAPTURES = 4
@@ -141,7 +149,7 @@ def capture_point(tester, r, resistors, points, v_high, where):
 
 
 def measure_connection(tester, info, path, set_name, resistors, prompt):
-    ends = info.get("ends", {}).get(path, ["?", "?"])
+    ends = info.get("ends", {}).get(path) or ENDS.get(path, ["?", "?"])
     where = f"socket {ends[0]} and socket {ends[1]}"
     print(f"\n=== {path}: {ends[0]} - {ends[1]}  ({USE.get(path, '')}) ===")
     if prompt:
