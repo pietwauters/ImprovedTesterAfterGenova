@@ -145,8 +145,14 @@ int getDifferentialSample(adc1_channel_t pin1, adc1_channel_t pin2, int nr_sampl
         detail->rev_mv1 = rev1;
         detail->rev_mv2 = rev2;
     }
+    // Average of both halves in whole mV. An odd sum is exactly x.5: round to even, because
+    // always rounding up would read about 0.25 mV high on average (0.7 % at 1 Ohm)
     int sum = (fwd1 - fwd2) + (rev2 - rev1);
-    return sum >= 0 ? (sum + 1) / 2 : -((-sum + 1) / 2);  // average, rounded half away from zero
+    int half = sum / 2;  // truncates toward zero
+    if (sum % 2 != 0 && half % 2 != 0) {
+        half += sum > 0 ? 1 : -1;
+    }
+    return half;
 }
 
 void init_AD() {

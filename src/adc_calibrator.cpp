@@ -81,17 +81,17 @@ EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::measu
     result.v_diff_sd_mv = var > 0 ? (float)sqrt(var) : 0.0f;
     result.samples_used = readings * samples_per_reading;
 
-    // Means of the halves (V). v_diff from the halves rather than from the rounded single readings
+    // v_diff: the mean of the readings exactly as the tests get them (including their rounding to
+    // whole mV), so the model converts what the tests measure. The halves are for diagnostics.
+    result.v_diff = (float)(mean / 1000.0);
     result.v_top = (float)(fwd1 / readings / 1000.0);
     result.v_bottom = (float)(fwd2 / readings / 1000.0);
     if (result.has_reversed) {
         result.v_top_rev = (float)(rev1 / readings / 1000.0);
         result.v_bottom_rev = (float)(rev2 / readings / 1000.0);
         result.v_diff_rev = result.v_bottom_rev - result.v_top_rev;
-        result.v_diff = ((result.v_top - result.v_bottom) + result.v_diff_rev) / 2.0f;
         result.v_high = (result.v_top + result.v_bottom_rev) / 2.0f;
     } else {
-        result.v_diff = result.v_top - result.v_bottom;
         result.v_high = result.v_top;
     }
 
