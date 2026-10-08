@@ -16,6 +16,8 @@ const char* calModelTypeName(uint8_t type) {
             return "empirical-v1";
         case CalModelEmpiricalBidir:
             return "empirical-bidir";
+        case CalModelDividerRi:
+            return "divider-ri";
         default:
             return "unknown";
     }
@@ -37,7 +39,7 @@ bool CalibrationStore::readModel(const char* key, StoredModel& out) const {
     esp_err_t err = nvs_get_blob(handle, key, &m, &size);
     nvs_close(handle);
     if (err != ESP_OK || size != sizeof(m) || m.version != kStoredModelVersion ||
-        (m.type != CalModelEmpiricalV1 && m.type != CalModelEmpiricalBidir)) {
+        (m.type != CalModelEmpiricalV1 && m.type != CalModelEmpiricalBidir && m.type != CalModelDividerRi)) {
         return false;
     }
     out = m;
@@ -63,14 +65,26 @@ bool CalibrationStore::load(const CalibrationPath& path, StoredModel& out) const
     return readModel(key, out);
 }
 
-bool CalibrationStore::loadActive(const CalibrationPath& path, StoredModel& out) const {
-    StoredModel m;
-    if (load(path, m) && m.type == CalModelEmpiricalBidir) {
-        out = m;
-        return true;
+bool usableModel(const StoredModel& stored, EmpiricalModel& out) {
+    switch (stored.type) {
+        case CalModelDividerRi:
+            out = stored.params;
+            return true;
+        case CalModelEmpiricalBidir:
+            // V = Vg R/(R + Rs + c/R) behaves like an internal series resistance Ri = -c/Rs
+            out = {stored.params.v_gpio, stored.params.r1_r2, -stored.params.r_internal / stored.params.r1_r2};
+            return stored.params.r1_r2 > 0;
+        default:
+            return false;
     }
-    if (load(kDefaultCalibrationPath, m) && m.type == CalModelEmpiricalBidir) {
-        out = m;
+}
+
+bool CalibrationStore::loadActive(const CalibrationPath& path, EmpiricalModel& out, StoredModel* stored) const {
+    StoredModel m;
+    if ((load(path, m) && usableModel(m, out)) || (load(kDefaultCalibrationPath, m) && usableModel(m, out))) {
+        if (stored != nullptr) {
+            *stored = m;
+        }
         return true;
     }
     return false;
@@ -92,12 +106,12 @@ bool CalibrationStore::save(const CalibrationPath& path, const EmpiricalModel& p
     if (readModel(current, old) && !writeModel(previous, old)) {
         return false;
     }
-    StoredModel m = {kStoredModelVersion, CalModelEmpiricalBidir, 0, params, runId};
+    StoredModel m = {kStoredModelVersion, CalModelDividerRi, 0, params, runId};
     if (!writeModel(current, m)) {
         return false;
     }
-    printf("Calibration saved for path %s: V_gpio=%.1fmV, R1_R2=%.1fΩ, Correction=%.1fΩ²\n", path.name,
-           params.v_gpio * 1000, params.r1_r2, params.correction);
+    printf("Calibration saved for path %s: V_gpio=%.1fmV, Rs=%.2fΩ, Ri=%.3fΩ\n", path.name, params.v_gpio * 1000,
+           params.r1_r2, params.r_internal);
     return true;
 }
 

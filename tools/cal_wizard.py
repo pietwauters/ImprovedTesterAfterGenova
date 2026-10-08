@@ -248,7 +248,9 @@ def main():
                   f"   ({p['err_pct_factory']:5.2f} %  {p['err_pct_active']:5.2f} %)")
         verdict = fit["verdict"]
         print(f"\nVerdict: {verdict.upper()}  (worst point {fit['fit']['max_err_pct']:.2f} %, "
-              f"target {fit['target_pct']:g} %, limit {fit['limit_pct']:g} %)")
+              f"target {fit['target_pct']:g} %, limit {fit['limit_pct']:g} %"
+              + (f"; above {fit['high_from_ohm']:g} Ohm {fit['target_pct_high']:g} % and {fit['limit_pct_high']:g} %"
+                 if "high_from_ohm" in fit else "") + ")")
 
         run_id = int(time.time())
         saved = False
@@ -268,8 +270,9 @@ def main():
                     + ([open_s["v_top_rev_mv"], open_s["v_diff_rev_mv"]] if "v_diff_rev_mv" in open_s else []),
             # [r_ohm, v_top_mv, v_bottom_mv, v_diff_mv, noise_sd_mv(, reversed v_top_mv, reversed v_diff_mv)]
             "pts": raw,
-            "fit": [m["v_gpio_mv"], m["r1_r2_ohm"], m["correction_ohm2"]],
-            "prev": [prev["v_gpio_mv"], prev["r1_r2_ohm"], prev["correction_ohm2"]],
+            "model": "m2",  # fit/prev: [v_gpio_mv, Rs, Ri]
+            "fit": [m["v_gpio_mv"], m["r1_r2_ohm"], m["r_internal_ohm"]],
+            "prev": [prev["v_gpio_mv"], prev["r1_r2_ohm"], prev["r_internal_ohm"]],
             "max_err": [fit["fit"]["max_err_pct"], fit["factory"]["max_err_pct"], fit["active"]["max_err_pct"]],
             "verdict": verdict, "saved": saved,
         }

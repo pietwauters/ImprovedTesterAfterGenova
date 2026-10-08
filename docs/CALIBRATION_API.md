@@ -40,8 +40,20 @@ While a session is open, mode detection is paused, the LED matrix shows a blue
 **C**, Wi-Fi stays on and the tester does not sleep. A session ends with
 `/api/cal/end` or after 5 minutes without API calls.
 
-Verdict: every point within **2 %** is `excellent`, within **5 %** `pass`,
-otherwise `fail`. A failed fit cannot be saved.
+Model (M2): the tester sees the unknown resistance plus an internal series
+resistance `Ri` (PCB traces, vias, wiring to the sockets) between its sense
+points, driven through `Rs` (the two 33 Ohm resistors plus the GPIO drivers):
+`V_diff = V_gpio * (R + Ri) / (R + Ri + Rs)`, so `R = Rs * V / (V_gpio - V) - Ri`,
+clamped at 0. It replaced `Rs + c/R`, whose negative `c` on hw_rev3 was `Ri` in
+disguise and had no solution below about 0.3 Ohm. Stored models of that older
+type are converted (`Ri = -c/Rs`, reported as `converted`); a recalibration is
+more accurate.
+
+Verdict per point, error relative to max(R, 1 Ohm) (so below 1 Ohm in ohms):
+up to 10 Ohm `excellent` within **2 %**, `pass` within **5 %**; above 10 Ohm
+5 % and 10 %. Otherwise `fail`, and a failed fit cannot be saved. The fit
+weights each point by its target, so a 50 Ohm point does not pull the precise
+range.
 
 ## Endpoints
 
@@ -55,7 +67,7 @@ All responses are JSON. Units are in the names (`_mv`, `_ohm`, `_pct`).
 | POST | `/api/cal/fit` | see below | Fit a model; returns it with per-point errors for the new, factory and active model. Nothing is saved |
 | POST | `/api/cal/save` | `{"run_id":123}` (optional) | Save the last fit (refused if there is none or it failed) |
 | POST | `/api/cal/undo` | `{"path":"Cl-Cr"}` (optional) | Swap the current and previous model of a path |
-| POST | `/api/cal/run` | run record JSON, max 1024 bytes compacted, must have `"id"` | Store a run record in the tester's ring |
+| POST | `/api/cal/run` | run record JSON, max 1536 bytes compacted, must have `"id"` | Store a run record in the tester's ring |
 | GET | `/api/cal/runs` | | Stored run records, oldest first |
 | POST | `/api/cal/feedback` | `{"event":"reset"\|"captured"\|"pass"\|"fail"}` | LED matrix: blue C, green flash on a capture, green or red C for the verdict |
 | POST | `/api/cal/end` | | Leave the `Calibrating` state |

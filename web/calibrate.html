@@ -280,6 +280,7 @@ async function refreshInfo() {
   let text;
   if (!m) text = "Not calibrated: it uses the standard values for this hardware. A calibration makes it more accurate.";
   else if (m.outdated) text = "Its calibration was made with the previous measuring method and is no longer used. Until you recalibrate, it uses the standard values for this hardware.";
+  else if (m.converted) text = "Calibrated with an older model type, converted. A new calibration makes it more accurate, especially below 1 Ω.";
   else text = "Calibrated.";
   $("tester-status").textContent = text;
   $("btn-undo").classList.toggle("hidden", !(m && m.has_previous));
@@ -593,16 +594,22 @@ async function showResult() {
   const [word, cls] = labels[fit.verdict];
   $("verdict").textContent = word;
   $("verdict").className = "verdict " + cls;
-  $("verdict-text").textContent = fit.verdict === "excellent" ? "Every resistor within " + fit.target_pct + " %."
-    : fit.verdict === "pass" ? "Every resistor within " + fit.limit_pct + " % (target " + fit.target_pct + " %)."
-    : "A resistor is more than " + fit.limit_pct + " % off. Check the resistors and their contacts, then repeat. The old calibration stays active.";
-  const errCls = e => e <= fit.target_pct ? "ok" : e <= fit.limit_pct ? "mid" : "ko";
+  const highFrom = fit.high_from_ohm || Infinity;
+  const above = fit.high_from_ohm ? " (" + fit.target_pct_high + " % above " + nice(highFrom) + " Ω)" : "";
+  const aboveLimit = fit.high_from_ohm ? " (" + fit.limit_pct_high + " % above " + nice(highFrom) + " Ω)" : "";
+  $("verdict-text").textContent = fit.verdict === "excellent" ? "Every resistor within " + fit.target_pct + " %" + above + "."
+    : fit.verdict === "pass" ? "Every resistor within " + fit.limit_pct + " %" + aboveLimit + "; target " + fit.target_pct + " %."
+    : "A resistor is outside its limit. Check the resistors and their contacts, then repeat. The old calibration stays active.";
+  // r omitted (model comparison): the tolerances up to 10 Ohm
+  const errCls = (e, r) => r > highFrom ? (e <= fit.target_pct_high ? "ok" : e <= fit.limit_pct_high ? "mid" : "ko")
+                                        : (e <= fit.target_pct ? "ok" : e <= fit.limit_pct ? "mid" : "ko");
   $("result-rows").innerHTML = fit.points.map(p =>
-    "<tr><td>" + nice(p.r_ohm) + " Ω</td><td>" + (p.r_est_ohm > 0 ? fmtR(p.r_est_ohm) : "–") + '</td><td class="' + errCls(p.err_pct) + '">' + fmt(p.err_pct, 2) + " %</td></tr>").join("");
+    "<tr><td>" + nice(p.r_ohm) + " Ω</td><td>" + (p.r_est_ohm >= 0 ? fmtR(p.r_est_ohm) : "–") + '</td><td class="' + errCls(p.err_pct, p.r_ohm) + '">' + fmt(p.err_pct, 2) + " %</td></tr>").join("")
+    + (fit.points.some(p => p.r_ohm < 1) ? '<tr><td colspan="3" class="muted">Below 1 Ω the error is shown relative to 1 Ω.</td></tr>' : "");
   $("compare-rows").innerHTML = [["New calibration", fit.fit], ["Before this run", fit.active], ["Factory values", fit.factory]].map(([n, e]) =>
     "<tr><td>" + n + '</td><td class="' + errCls(e.max_err_pct) + '">' + fmt(e.max_err_pct, 2) + " %</td><td>" + fmt(e.rms_mv, 2) + " mV</td></tr>").join("");
   const m = fit.model;
-  $("params").textContent = "V_gpio " + m.v_gpio_mv + " mV · R1+R2 " + m.r1_r2_ohm + " Ω · correction " + m.correction_ohm2 + " Ω² · set “" + session.set.name + "”";
+  $("params").textContent = "V_gpio " + fmt(m.v_gpio_mv, 1) + " mV · Rs " + fmt(m.r1_r2_ohm, 3) + " Ω · Ri " + fmt(m.r_internal_ohm, 4) + " Ω (inside the tester) · set “" + session.set.name + "”";
   $("btn-save").classList.toggle("hidden", fit.verdict === "fail");
   $("result-actions").classList.remove("hidden");
   $("saved-note").classList.add("hidden");
@@ -623,8 +630,9 @@ function runRecord() {
       ? [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv, session.open.v_top_rev_mv, session.open.v_diff_rev_mv]
       : [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv],
     pts: session.raw,
-    fit: [m.v_gpio_mv, m.r1_r2_ohm, m.correction_ohm2],
-    prev: [p.v_gpio_mv, p.r1_r2_ohm, p.correction_ohm2],
+    model: "m2",  // fit/prev: [v_gpio_mv, Rs, Ri]
+    fit: [m.v_gpio_mv, m.r1_r2_ohm, m.r_internal_ohm],
+    prev: [p.v_gpio_mv, p.r1_r2_ohm, p.r_internal_ohm],
     max_err: [lastFit.fit.max_err_pct, lastFit.factory.max_err_pct, lastFit.active.max_err_pct],
     verdict: lastFit.verdict, saved: !!session.saved
   };

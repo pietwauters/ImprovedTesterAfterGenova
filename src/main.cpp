@@ -203,7 +203,7 @@ void handleCalibrateCommand(ITerminal* term, const std::vector<String>& args) {
     if (tester != nullptr) {
         term->printf("v_gpio = %f\n", tester->get_v_gpio());
         term->printf("r1r2 = %f\n", tester->get_r1_r2());
-        term->printf("correction = %f\n", tester->get_correction());
+        term->printf("r_internal = %f\n", tester->get_r_internal());
     }
 }
 

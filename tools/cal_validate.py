@@ -65,11 +65,15 @@ MAX_CAPTURES = 4
 
 
 def model_resistance(model_json, v_diff_mv):
-    """The firmware's modelResistance(), for a model as /api/cal returns it."""
+    """The firmware's modelResistance(), for a model as /api/cal returns it (M2, or the older Rs + c/R)."""
     g = model_json["v_gpio_mv"] / 1000
     k = model_json["r1_r2_ohm"]
-    c = model_json["correction_ohm2"]
     v = v_diff_mv / 1000
+    if "r_internal_ohm" in model_json:
+        if v >= g:
+            return -1.0
+        return max(0.0, k * v / (g - v) - model_json["r_internal_ohm"]) if v > 0 else 0.0
+    c = model_json["correction_ohm2"]
     if v <= 0 or v >= g:
         return -1.0
     a, b, cc = v - g, v * k, v * c
@@ -82,8 +86,9 @@ def model_resistance(model_json, v_diff_mv):
 
 
 def signed_error(model_json, r, v_diff_mv):
+    """Error in % of max(R, 1 Ohm), as the firmware judges it."""
     est = model_resistance(model_json, v_diff_mv)
-    return est, ((est - r) / r * 100) if est > 0 else float("nan")
+    return est, ((est - r) / max(r, 1.0) * 100) if est >= 0 else float("nan")
 
 
 def agreement(a, b):
@@ -200,8 +205,9 @@ def measure_connection(tester, info, path, set_name, resistors, prompt):
                  open_s.get("v_top_rev_mv", 0), open_s.get("v_diff_rev_mv", 0)],
         # [r_ohm, v_top_mv, v_bottom_mv, v_diff_mv (average), noise_sd_mv, reversed v_top_mv, reversed v_diff_mv]
         "pts": raw, "contact": contact,
-        "active": [active["v_gpio_mv"], active["r1_r2_ohm"], active["correction_ohm2"]],
-        "own": [own["v_gpio_mv"], own["r1_r2_ohm"], own["correction_ohm2"]],
+        "model": "m2" if "r_internal_ohm" in active else "m0",  # active/own: [v_gpio_mv, Rs, Ri or c]
+        "active": [active["v_gpio_mv"], active["r1_r2_ohm"], active.get("r_internal_ohm", active.get("correction_ohm2"))],
+        "own": [own["v_gpio_mv"], own["r1_r2_ohm"], own.get("r_internal_ohm", own.get("correction_ohm2"))],
         "result": {"active_worst": round(worst_act, 3), "active_rms": round(rms_act, 3), "own_worst": round(worst_own, 3)},
     }
     return record

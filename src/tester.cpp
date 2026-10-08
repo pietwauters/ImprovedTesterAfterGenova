@@ -152,7 +152,7 @@ void Tester::begin(bool ForceCalibration) {
     mycalibrator.begin(br_analog, bl_analog);
     calibrationService.begin();
     // Try to load existing calibration (fitted on the current, bidirectional readings)
-    StoredModel stored;
+    EmpiricalModel stored;
     if ((ForceCalibration) || !calibrationStore.loadActive(kDefaultCalibrationPath, stored)) {
         // No existing calibration, run interactive calibration
         mycalibrator.DoFactoryReset();
@@ -174,7 +174,7 @@ void Tester::begin(bool ForceCalibration) {
             }
         }
     } else {
-        mycalibrator.setModel(stored.params);
+        mycalibrator.setModel(stored);
         DefaultBlinkColor = LedPanel->m_Green;
     }
     calibrationService.setActiveModel(mycalibrator.model());

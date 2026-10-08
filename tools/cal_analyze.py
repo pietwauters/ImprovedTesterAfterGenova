@@ -4,9 +4,9 @@
     python3 tools/cal_analyze.py                         # cal_runs.jsonl in this folder
     python3 tools/cal_analyze.py tester-calibration-2026-10-08.json
 
-For every run it refits the model the way the firmware does (least squares on
-the relative resistance error, V_gpio = open-circuit high side) and prints the
-error per resistor. Runs recorded with the reversed half are fitted three ways:
+For every run it refits the model the way the firmware does (model M2 with an
+internal series resistance, tolerance-weighted least squares, V_gpio =
+open-circuit high side) and prints the error per resistor (in % of max(R, 1 Ohm)). Runs recorded with the reversed half are fitted three ways:
 forward only, reversed only and the average of both. The firmware calibrates on
 the average (bidirectional readings) since run record format 2.
 """
@@ -14,6 +14,57 @@ the average (bidirectional readings) since run record format 2.
 import json
 import math
 import sys
+
+
+# ---- Model M2 (firmware since the M2 change): internal series resistance Ri between the sense points
+#   V = Vg (R + Ri) / (R + Ri + Rs)        R = Rs V / (Vg - V) - Ri
+# Errors are judged and fitted relative to max(R, 1 Ohm), against a target of 2 % up to 10 Ohm and
+# 5 % above (limits 5 % and 10 %), exactly as the firmware does.
+
+TARGET_LOW, LIMIT_LOW, TARGET_HIGH, LIMIT_HIGH, HIGH_FROM = 2.0, 5.0, 5.0, 10.0, 10.0
+
+
+def m2_volt(m, r):
+    g, rs, ri = m
+    return g * (r + ri) / (r + ri + rs)
+
+
+def m2_res(m, v, clamp=True):
+    g, rs, ri = m
+    if v >= g:
+        return -1.0
+    r = rs * v / (g - v) - ri
+    return max(0.0, r) if clamp else r
+
+
+def scaled_error(est, r):
+    """Error in % of max(R, 1 Ohm): below 1 Ohm it counts in ohms (2 % = 20 mOhm)."""
+    return (est - r) / max(r, 1.0) * 100
+
+
+def target(r):
+    return TARGET_HIGH if r > HIGH_FROM else TARGET_LOW
+
+
+def m2_errors(m, R, V):
+    return [scaled_error(m2_res(m, v, clamp=False), r) for r, v in zip(R, V)]
+
+
+def fit_m2(R, V, vg):
+    """Least squares on the tolerance-weighted error over (Rs, Ri), V_gpio fixed."""
+    def cost(x):
+        e = m2_errors((vg, x[0], x[1]), R, V)
+        return sum((ei / target(r)) ** 2 for ei, r in zip(e, R))
+    seeds = sorted(r * (vg - v) / v for r, v in zip(R, V) if 0 < v < vg)
+    x = nelder_mead(cost, [seeds[len(seeds) // 2], 0.0], [2.0, 0.05])
+    x = nelder_mead(cost, x, [0.2, 0.005])
+    return (vg, x[0], x[1])
+
+
+def m2_from_m0(m):
+    """An M0 model (Rs, c) as M2: Ri = -c / Rs."""
+    g, rs, c = m
+    return (g, rs, -c / rs)
 
 
 def volt(m, r):
@@ -81,8 +132,8 @@ def fit(R, V, vg):
 def leave_one_out(R, V, vg):
     worst = 0.0
     for i in range(len(R)):
-        m = fit(R[:i] + R[i + 1:], V[:i] + V[i + 1:], vg)
-        worst = max(worst, abs(errors(m, [R[i]], [V[i]])[0]))
+        m = fit_m2(R[:i] + R[i + 1:], V[:i] + V[i + 1:], vg)
+        worst = max(worst, abs(m2_errors(m, [R[i]], [V[i]])[0]))
     return worst
 
 
@@ -99,8 +150,8 @@ def load(path):
 
 
 def report(name, R, V, vg):
-    m = fit(R, V, vg)
-    e = errors(m, R, V)
+    m = fit_m2(R, V, vg)
+    e = m2_errors(m, R, V)
     print(f"  {name:10s} worst {max(map(abs, e)):5.2f} %   rms {math.sqrt(sum(x * x for x in e) / len(e)):5.2f} %"
           f"   left-out point {leave_one_out(R, V, vg):5.2f} %   errors " + " ".join(f"{x:+6.2f}" for x in e))
     return m
@@ -143,10 +194,13 @@ def report_validations(runs):
     for run in runs:
         R = [p[0] for p in run["pts"]]
         V = [p[3] / 1000 for p in run["pts"]]  # bidirectional average
-        a = run["active"]
-        e = errors((a[0] / 1000, a[1], a[2]), R, V)
-        o = run["own"]
-        own = errors((o[0] / 1000, o[1], o[2]), R, V)
+        a, o = run["active"], run["own"]
+        if run.get("model") == "m2":
+            e = m2_errors((a[0] / 1000, a[1], a[2]), R, V)
+            own = m2_errors((o[0] / 1000, o[1], o[2]), R, V)
+        else:  # older records: the Rs + c/R model the tester used then
+            e = errors((a[0] / 1000, a[1], a[2]), R, V)
+            own = errors((o[0] / 1000, o[1], o[2]), R, V)
         ends = " - ".join(run.get("ends", ["?", "?"]))
         name = f" '{run['name']}'" if run.get("name") else ""
         print(f"  {run.get('mac', '')[-5:]}{name} {run['path']:6s} {ends:20s} worst {max(e, key=abs):+6.2f} %  "

@@ -7,8 +7,9 @@
 
 // Model types, so a future formula or measuring method can be stored next to the current one
 enum CalModelType : uint8_t {
-    CalModelEmpiricalV1 = 1,     // fitted on forward-only readings: outdated, no longer used
-    CalModelEmpiricalBidir = 2,  // fitted on bidirectional readings (getDifferentialSample since step 2)
+    CalModelEmpiricalV1 = 1,     // Rs + c/R on forward-only readings: outdated, not used
+    CalModelEmpiricalBidir = 2,  // Rs + c/R on bidirectional readings: converted to M2 (Ri = -c/Rs) on load
+    CalModelDividerRi = 3,       // M2, internal series resistance Ri (current)
 };
 const char* calModelTypeName(uint8_t type);
 
@@ -19,9 +20,12 @@ struct StoredModel {
     uint16_t version;
     uint8_t type;  // CalModelType
     uint8_t flags;
-    EmpiricalModel params;
-    uint32_t runId;  // run record that produced it (0 = unknown)
+    EmpiricalModel params;  // type 3: v_gpio, Rs, Ri. Types 1 and 2: v_gpio, Rs, c (in the r_internal slot)
+    uint32_t runId;         // run record that produced it (0 = unknown)
 };
+
+// The model the tester can use from a stored one: type 3 as is, type 2 converted. False for type 1.
+bool usableModel(const StoredModel& stored, EmpiricalModel& out);
 
 // Persists calibration models, one per measurement path plus the previous one
 // for undo, and a small ring of calibration run records for statistics.
@@ -30,13 +34,12 @@ struct StoredModel {
 class CalibrationStore {
    public:
     static constexpr int MaxRuns = 6;
-    static constexpr size_t MaxRunBytes = 1024;
+    static constexpr size_t MaxRunBytes = 1536;
 
     // Model stored for exactly this path
     bool load(const CalibrationPath& path, StoredModel& out) const;
-    // Model the tester can use for this path: its own, else the default path's, and only if it
-    // was fitted on the current (bidirectional) readings
-    bool loadActive(const CalibrationPath& path, StoredModel& out) const;
+    // Model the tester can use for this path: its own, else the default path's, if usable
+    bool loadActive(const CalibrationPath& path, EmpiricalModel& out, StoredModel* stored = nullptr) const;
     bool hasPrevious(const CalibrationPath& path) const;
 
     // Store a new model; the one it replaces becomes the previous model

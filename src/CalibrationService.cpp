@@ -285,10 +285,10 @@ static void addRounded(cJSON* obj, const char* name, double value, int decimals)
 
 static cJSON* modelToJson(const EmpiricalModel& m) {
     cJSON* obj = cJSON_CreateObject();
-    cJSON_AddStringToObject(obj, "type", calModelTypeName(CalModelEmpiricalBidir));
+    cJSON_AddStringToObject(obj, "type", calModelTypeName(CalModelDividerRi));
     addRounded(obj, "v_gpio_mv", m.v_gpio * 1000.0, 2);
     addRounded(obj, "r1_r2_ohm", m.r1_r2, 3);
-    addRounded(obj, "correction_ohm2", m.correction, 3);
+    addRounded(obj, "r_internal_ohm", m.r_internal, 4);
     return obj;
 }
 
@@ -352,11 +352,15 @@ static void addModelInfo(cJSON* models, const CalibrationPath& path) {
     if (!calibrationStore.load(path, m)) {
         return;
     }
-    cJSON* obj = modelToJson(m.params);
+    EmpiricalModel usable;
+    bool ok = usableModel(m, usable);
+    cJSON* obj = modelToJson(ok ? usable : m.params);
     cJSON_ReplaceItemInObjectCaseSensitive(obj, "type", cJSON_CreateString(calModelTypeName(m.type)));
     cJSON_AddStringToObject(obj, "path", path.name);
-    // Fitted on forward-only readings: no longer used, the tester runs on the default model
-    cJSON_AddBoolToObject(obj, "outdated", m.type != CalModelEmpiricalBidir);
+    // Outdated: forward-only readings, not used (the tester runs on the default model).
+    // Converted: an older model type, used after conversion; a new calibration is more accurate.
+    cJSON_AddBoolToObject(obj, "outdated", !ok);
+    cJSON_AddBoolToObject(obj, "converted", ok && m.type != CalModelDividerRi);
     cJSON_AddBoolToObject(obj, "migrated", (m.flags & CalModelMigrated) != 0);
     cJSON_AddNumberToObject(obj, "run_id", m.runId);
     cJSON_AddBoolToObject(obj, "has_previous", calibrationStore.hasPrevious(path));
@@ -449,6 +453,9 @@ static void handleFit(AsyncWebServerRequest* request, cJSON* body) {
     }
     addRounded(obj, "limit_pct", CalPassPercent, 1);
     addRounded(obj, "target_pct", CalExcellentPercent, 1);
+    addRounded(obj, "high_from_ohm", CalHighFromOhm, 1);  // above this: the *_high tolerances
+    addRounded(obj, "limit_pct_high", CalPassPercentHigh, 1);
+    addRounded(obj, "target_pct_high", CalExcellentPercentHigh, 1);
     sendJson(request, 200, obj);
 }
 
@@ -461,7 +468,7 @@ static void handleSave(AsyncWebServerRequest* request, cJSON* body) {
         return;
     }
     if (verdict == CalFail) {
-        sendError(request, 409, "fit failed the 5% limit; not saved");
+        sendError(request, 409, "a point is outside its limit; not saved");
         return;
     }
     uint32_t runId = 0;
@@ -496,14 +503,16 @@ static void handleUndo(AsyncWebServerRequest* request, cJSON* body) {
     }
     if (path == &kDefaultCalibrationPath) {
         // An outdated (forward-only) model is not used: the tester falls back to the default
-        calibrationService.queueModel(restored.type == CalModelEmpiricalBidir
-                                          ? restored.params
-                                          : EmpiricalResistorCalibrator::factoryModel());
+        EmpiricalModel usable;
+        calibrationService.queueModel(usableModel(restored, usable) ? usable
+                                                                    : EmpiricalResistorCalibrator::factoryModel());
     }
+    EmpiricalModel shown;
+    bool ok = usableModel(restored, shown);
     cJSON* obj = cJSON_CreateObject();
     cJSON_AddStringToObject(obj, "path", path->name);
-    cJSON_AddItemToObject(obj, "model", modelToJson(restored.params));
-    cJSON_AddBoolToObject(obj, "outdated", restored.type != CalModelEmpiricalBidir);
+    cJSON_AddItemToObject(obj, "model", modelToJson(ok ? shown : restored.params));
+    cJSON_AddBoolToObject(obj, "outdated", !ok);
     sendJson(request, 200, obj);
 }
 
@@ -580,6 +589,9 @@ static void handleInfo(AsyncWebServerRequest* request, const String& deviceName)
     cJSON_AddNumberToObject(obj, "max_runs", CalibrationStore::MaxRuns);
     addRounded(obj, "limit_pct", CalPassPercent, 1);
     addRounded(obj, "target_pct", CalExcellentPercent, 1);
+    addRounded(obj, "high_from_ohm", CalHighFromOhm, 1);  // above this: the *_high tolerances
+    addRounded(obj, "limit_pct_high", CalPassPercentHigh, 1);
+    addRounded(obj, "target_pct_high", CalExcellentPercentHigh, 1);
     sendJson(request, 200, obj);
 }
 

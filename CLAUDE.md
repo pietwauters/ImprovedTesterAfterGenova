@@ -63,12 +63,14 @@ Recently refactored (`refactor/measurement-architecture` branch, merged into
   resistance + JSON/binary serialization for cross-device communication).
 - **`adc_calibrator.h/.cpp`** (`EmpiricalResistorCalibrator`) — converts raw mV
   readings to Ohms (`get_resistance_empirical`) and Ohm thresholds to mV
-  (`get_mv_threshold`), using an empirically fitted model (`v_gpio`, `r1_r2`,
-  `correction`). Pure model maths (`fit`, `evaluate`, `modelResistance`) plus
-  `measure(path)` (averages `getDifferentialSample` readings); verdict per point
-  ≤ 2 % excellent, ≤ 5 % pass, else fail. `Default_*` is the model used until a
-  tester is calibrated; per hardware revision (hw_rev3: pooled fit of two
-  calibrated testers).
+  (`get_mv_threshold`) with model M2: `V = V_gpio (R + Ri) / (R + Ri + Rs)`,
+  `Rs` = 33 Ohm resistors + GPIO drivers outside the sense points, `Ri` =
+  internal series resistance between them (traces, vias, socket wiring).
+  Readings clamp at 0. Pure model maths (`fit`, `evaluate`, `modelResistance`)
+  plus `measure(path)` (averages `getDifferentialSample` readings). Errors
+  count relative to max(R, 1 Ohm); verdict ≤ 2 % excellent, ≤ 5 % pass up to
+  10 Ohm, 5 % / 10 % above. `Default_*` is the model used until a tester is
+  calibrated, per hardware revision (hw_rev3: pooled fit of two testers).
 
 ## Calibration over Wi-Fi
 
@@ -83,8 +85,9 @@ header). Resistor sets and run history live in the operator's browser.
   all thresholds. `tools/cal_validate.py` measures how well that model reads
   the other connections.
 - **`CalibrationStore`** — NVS `cal_store`: model per path + previous (undo),
-  ring of 6 run records. Model type `empirical-bidir` is used;
-  `empirical-v1` (forward-only readings) is kept but ignored as outdated.
+  ring of 6 run records. Model type `divider-ri` (M2) is current;
+  `empirical-bidir` (Rs + c/R) is converted on load (`Ri = -c/Rs`);
+  `empirical-v1` (forward-only readings) is ignored as outdated.
 - **`CalibrationService`** — `/api/cal/*` handlers (async_tcp task) only
   request; the tester task's `Calibrating` state owns the hardware, samples
   continuously, applies saved models, mirrors progress on the LED matrix and
