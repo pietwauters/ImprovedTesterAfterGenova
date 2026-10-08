@@ -275,7 +275,7 @@ function show(id) { screens.forEach(s => $(s).classList.toggle("hidden", s !== i
 let info = null;
 async function refreshInfo() {
   info = await api("GET", "/api/cal/info");
-  $("device").textContent = (info.name || "Tester") + " · hw rev " + info.hw_rev + " · fw " + info.fw;
+  $("device").textContent = (info.name || "Tester") + " · " + (info.mac || "").slice(-5) + " · hw rev " + info.hw_rev + " · fw " + info.fw;
   const m = (info.models || []).find(x => x.path === info.default_path);
   let text;
   if (!m) text = "Not calibrated: it uses the standard values for this hardware. A calibration makes it more accurate.";
@@ -443,14 +443,41 @@ function estimateR(vDiff) {
   return median * vDiff / (vg - vDiff);
 }
 
-function askWrong(expected, guess) {
+// Warning with two choices; resolves "again" or "keep"
+function askChoice(text, againLabel, keepLabel) {
   return new Promise(resolve => {
-    $("wrong-text").textContent = "This reads like the " + nice(guess) + " Ω resistor, not " + nice(expected) + " Ω. Check which one is connected.";
+    $("wrong-text").textContent = text;
+    $("btn-remeasure").textContent = againLabel;
+    $("btn-keep").textContent = keepLabel;
     $("wrong").classList.remove("hidden");
     $("btn-remeasure").onclick = () => { $("wrong").classList.add("hidden"); resolve("again"); };
     $("btn-keep").onclick = () => { $("wrong").classList.add("hidden"); resolve("keep"); };
   });
 }
+function askWrong(expected, guess) {
+  return askChoice("This reads like the " + nice(guess) + " Ω resistor, not " + nice(expected) + " Ω. Check which one is connected.",
+                   "Measure again", "Keep this reading");
+}
+
+// Contact check: each resistor is captured twice, reseated in between. Two captures agree within
+// 0.5 %, or within 4 sigma of the noise of a window mean (12 readings of 32) if that is larger.
+const READINGS_PER_WINDOW = 12 * 32;
+const MAX_CAPTURES = 4;
+function agreement(a, b) {
+  const v = (a.v_diff_mv + b.v_diff_mv) / 2;
+  const noise = Math.sqrt(((a.noise_sd_mv || 0) ** 2 + (b.noise_sd_mv || 0) ** 2) / READINGS_PER_WINDOW);
+  return { spreadPct: Math.abs(a.v_diff_mv - b.v_diff_mv) / v * 100, tolPct: Math.max(0.5, 4 * noise / v * 100) };
+}
+function closestPair(caps) {
+  let best = null;
+  for (let i = 0; i < caps.length; i++)
+    for (let j = i + 1; j < caps.length; j++) {
+      const g = agreement(caps[i], caps[j]);
+      if (!best || g.spreadPct < best.spreadPct) best = { a: caps[i], b: caps[j], ...g };
+    }
+  return best;
+}
+const mean2 = (a, b, k) => (a[k] !== undefined && b[k] !== undefined) ? (a[k] + b[k]) / 2 : undefined;
 
 async function waitOpen(text) {
   await waitFor(s => s.open, (s, holds, fresh) => {
@@ -460,37 +487,61 @@ async function waitOpen(text) {
 
 async function captureResistor(i, total) {
   const r = session.set.values[i];
+  const where = "Between socket " + session.letter + " on top and socket " + session.letter + " on the bottom.";
+  const caps = [];
+  let note = "";
   for (;;) {
-    stepView(i + 2, total, "Connect the " + nice(r) + " Ω resistor",
-      "Between socket " + session.letter + " on top and socket " + session.letter + " on the bottom. Keep it still until it is captured.", true);
+    const again = caps.length > 0;
+    stepView(i + 2, total, again ? "Connect the " + nice(r) + " Ω resistor again" : "Connect the " + nice(r) + " Ω resistor",
+      note || (again ? "Contact check: a second reading must match the first. Seat it firmly." : where + " Keep it still until it is captured."), true);
     renderStepChips();
     const s = await waitFor(x => !x.open, (x, holds, fresh) => {
       if (x.open) setReading("Open", "Waiting for the resistor…", 0);
       else setReading(x.v_diff_mv.toFixed(1) + " mV", x.stable && holds ? "Stable" : "Settling…", fresh);
     });
-    const est = estimateR(s.v_diff_mv);
-    if (est !== null) {
-      const guess = session.set.values.reduce((a, b) => Math.abs(b - est) < Math.abs(a - est) ? b : a);
-      if (guess !== r && Math.abs(est - r) / r > 0.15) {
-        setReading(s.v_diff_mv.toFixed(1) + " mV", "Check the resistor", 1);
-        if (await askWrong(r, guess) === "again") {
-          stepView(i + 2, total, "Remove the resistor", "Then connect the " + nice(r) + " Ω resistor again.", true);
-          await waitOpen("Remove the resistor");
-          continue;
+    if (!again) {
+      const est = estimateR(s.v_diff_mv);
+      if (est !== null) {
+        const guess = session.set.values.reduce((a, b) => Math.abs(b - est) < Math.abs(a - est) ? b : a);
+        if (guess !== r && Math.abs(est - r) / r > 0.15) {
+          setReading(s.v_diff_mv.toFixed(1) + " mV", "Check the resistor", 1);
+          if (await askWrong(r, guess) === "again") {
+            stepView(i + 2, total, "Remove the resistor", "Then connect the " + nice(r) + " Ω resistor again.", true);
+            await waitOpen("Remove the resistor");
+            continue;
+          }
         }
       }
     }
-    session.points.push({ r_ohm: r, v_diff_mv: s.v_diff_mv });
-    // [r, v_top, v_bottom, v_diff, noise sd, reversed v_top, reversed v_diff] (mV)
-    session.raw.push(s.v_diff_rev_mv !== undefined
-      ? [r, s.v_top_mv, s.v_bottom_mv, s.v_diff_mv, s.noise_sd_mv, s.v_top_rev_mv, s.v_diff_rev_mv]
-      : [r, s.v_top_mv, s.v_bottom_mv, s.v_diff_mv, s.noise_sd_mv]);
+    caps.push(s);
     feedback("captured");
-    renderStepChips();
     setReading(s.v_diff_mv.toFixed(1) + " mV", "✓ Captured", 1);
     $("instruction").textContent = "Captured. Remove the resistor.";
     $("hint").textContent = "";
     await waitOpen("Remove the resistor");
+    if (caps.length < 2) { note = ""; continue; }
+
+    const pair = closestPair(caps);
+    if (pair.spreadPct > pair.tolPct) {
+      if (caps.length < MAX_CAPTURES) {
+        note = "The readings differ by " + fmt(pair.spreadPct, 2) + " %: a contact is not good. Clean or reseat the resistor and its plugs firmly.";
+        continue;
+      }
+      const choice = await askChoice("The readings keep differing (closest two: " + fmt(pair.spreadPct, 2) +
+        " %). Clean the resistor leads and the sockets.", "Start this resistor again", "Use the closest two");
+      if (choice === "again") { caps.length = 0; note = ""; continue; }
+    }
+    // Accept: the mean of the two closest captures
+    const a = pair.a, b = pair.b;
+    const v = mean2(a, b, "v_diff_mv");
+    session.points.push({ r_ohm: r, v_diff_mv: v });
+    // [r, v_top, v_bottom, v_diff, noise sd, reversed v_top, reversed v_diff] (mV)
+    const rev = mean2(a, b, "v_diff_rev_mv");
+    session.raw.push(rev !== undefined
+      ? [r, mean2(a, b, "v_top_mv"), mean2(a, b, "v_bottom_mv"), v, Math.max(a.noise_sd_mv, b.noise_sd_mv), mean2(a, b, "v_top_rev_mv"), rev]
+      : [r, mean2(a, b, "v_top_mv"), mean2(a, b, "v_bottom_mv"), v, Math.max(a.noise_sd_mv, b.noise_sd_mv)]);
+    session.contact.push([caps.length, +fmt(pair.spreadPct, 2)]);
+    renderStepChips();
     return;
   }
 }
@@ -498,7 +549,7 @@ async function captureResistor(i, total) {
 async function startCalibration() {
   const set = currentSet();
   session = { set, path: info.default_path, letter: (info.sockets || {})[info.default_path] || "A", points: [], raw: [], aborted: false,
-              prev: info.active_model, recorded: false, runId: Math.floor(Date.now() / 1000) };
+              prev: info.active_model, recorded: false, runId: Math.floor(Date.now() / 1000), contact: [] };
   drawSockets(session.letter);
   const total = set.values.length + 1;
   show("s-wizard");
@@ -515,7 +566,7 @@ async function startCalibration() {
       if (Date.now() - t0 > 3000) $("hint").textContent = "Unplug any body cord or weapon from the tester.";
       await sleep(POLL_MS);
     }
-    stepView(1, total, "Remove everything from the tester", "No cords, no clips, no resistor.", false);
+    stepView(1, total, "Remove everything from the tester", "No cords, no clips, no resistor. Then each resistor is connected twice, to check the contacts.", false);
     const open = await waitFor(s => s.open, (s, holds, fresh) => {
       setReading(s.open ? "Open" : "≈ " + fmtR(s.r_est_ohm), s.open ? (s.stable ? "Stable" : "Settling…") : "Something is still connected", fresh);
     });
@@ -566,7 +617,8 @@ function runRecord() {
   return {
     // fmt 2: pts[3] and open[2] are the bidirectional average (fmt 1: forward only)
     id: session.runId, ts: session.runId, fmt: 2, kind: "calibrate", src: "web", set: session.set.name, path: session.path,
-    mac: info.mac, hw: info.hw_rev, fw: info.fw,
+    mac: info.mac, name: info.name, hw: info.hw_rev, fw: info.fw,
+    contact: session.contact,  // per resistor: [captures needed, spread % of the pair used]
     open: session.open.v_diff_rev_mv !== undefined
       ? [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv, session.open.v_top_rev_mv, session.open.v_diff_rev_mv]
       : [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv],

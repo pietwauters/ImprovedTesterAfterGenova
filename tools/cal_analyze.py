@@ -114,7 +114,8 @@ def main():
     for run in runs:
         pts = run["pts"]
         R = [p[0] for p in pts]
-        print(f"\nRun {run.get('id')}  tester {run.get('mac')}  hw_rev{run.get('hw')}  set '{run.get('set')}'  "
+        name = f" '{run['name']}'" if run.get("name") else ""
+        print(f"\nRun {run.get('id')}  tester {run.get('mac')}{name}  hw_rev{run.get('hw')}  set '{run.get('set')}'  "
               f"path {run.get('path')}  saved {run.get('saved')}")
         print("  resistors  " + " ".join(f"{r:6.2f}" for r in R) + " Ohm")
         op = run["open"]
@@ -126,6 +127,8 @@ def main():
             vg_rev = (op[3] + op[4]) / 1000
             report("reversed", R, rev, vg_rev)
             report("average", R, [(a + b) / 2 for a, b in zip(fwd, rev)], (op[0] / 1000 + vg_rev) / 2)
+            if run.get("contact"):
+                print("  contact check (captures, spread %)  " + "  ".join(f"{c[0]}/{c[1]:.2f}" for c in run["contact"]))
             print("  forward - reversed V_diff  " + " ".join(f"{(p[1] - p[2] - p[6]):+6.2f}" for p in pts) + " mV")
 
 
