@@ -10,7 +10,16 @@ static constexpr uint16_t kStoredModelVersion = 1;
 // Keep this many NVS entries (32 bytes each) free for the settings and everything else
 static constexpr size_t kNvsReserveEntries = 64;
 
-const char* calModelTypeName(uint8_t type) { return type == CalModelEmpiricalV1 ? "empirical-v1" : "unknown"; }
+const char* calModelTypeName(uint8_t type) {
+    switch (type) {
+        case CalModelEmpiricalV1:
+            return "empirical-v1";
+        case CalModelEmpiricalBidir:
+            return "empirical-bidir";
+        default:
+            return "unknown";
+    }
+}
 
 static void modelKey(char* key, size_t size, char prefix, const CalibrationPath& path) {
     snprintf(key, size, "%c_%s", prefix, path.name);  // NVS keys are at most 15 characters
@@ -27,7 +36,8 @@ bool CalibrationStore::readModel(const char* key, StoredModel& out) const {
     size_t size = sizeof(m);
     esp_err_t err = nvs_get_blob(handle, key, &m, &size);
     nvs_close(handle);
-    if (err != ESP_OK || size != sizeof(m) || m.version != kStoredModelVersion || m.type != CalModelEmpiricalV1) {
+    if (err != ESP_OK || size != sizeof(m) || m.version != kStoredModelVersion ||
+        (m.type != CalModelEmpiricalV1 && m.type != CalModelEmpiricalBidir)) {
         return false;
     }
     out = m;
@@ -53,8 +63,17 @@ bool CalibrationStore::load(const CalibrationPath& path, StoredModel& out) const
     return readModel(key, out);
 }
 
-bool CalibrationStore::loadForPath(const CalibrationPath& path, StoredModel& out) const {
-    return load(path, out) || load(kDefaultCalibrationPath, out);
+bool CalibrationStore::loadActive(const CalibrationPath& path, StoredModel& out) const {
+    StoredModel m;
+    if (load(path, m) && m.type == CalModelEmpiricalBidir) {
+        out = m;
+        return true;
+    }
+    if (load(kDefaultCalibrationPath, m) && m.type == CalModelEmpiricalBidir) {
+        out = m;
+        return true;
+    }
+    return false;
 }
 
 bool CalibrationStore::hasPrevious(const CalibrationPath& path) const {
@@ -73,7 +92,7 @@ bool CalibrationStore::save(const CalibrationPath& path, const EmpiricalModel& p
     if (readModel(current, old) && !writeModel(previous, old)) {
         return false;
     }
-    StoredModel m = {kStoredModelVersion, CalModelEmpiricalV1, 0, params, runId};
+    StoredModel m = {kStoredModelVersion, CalModelEmpiricalBidir, 0, params, runId};
     if (!writeModel(current, m)) {
         return false;
     }
@@ -96,24 +115,6 @@ bool CalibrationStore::undo(const CalibrationPath& path, StoredModel& restored) 
         return false;
     }
     restored = prev;
-    return true;
-}
-
-bool CalibrationStore::migrateLegacy(EmpiricalResistorCalibrator& legacyLoader) {
-    StoredModel existing;
-    if (load(kDefaultCalibrationPath, existing)) {
-        return false;  // already migrated or calibrated with the new store
-    }
-    if (!legacyLoader.load_calibration_from_nvs()) {
-        return false;
-    }
-    char key[16];
-    modelKey(key, sizeof(key), 'm', kDefaultCalibrationPath);
-    StoredModel m = {kStoredModelVersion, CalModelEmpiricalV1, CalModelMigrated, legacyLoader.model(), 0};
-    if (!writeModel(key, m)) {
-        return false;
-    }
-    printf("Legacy calibration migrated to path %s\n", kDefaultCalibrationPath.name);
     return true;
 }
 

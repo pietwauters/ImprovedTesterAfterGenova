@@ -19,9 +19,31 @@ static esp_adc_cal_characteristics_t adc_chars;
 static int samples1[MAX_NUM_ADC_SAMPLES];
 static int samples2[MAX_NUM_ADC_SAMPLES];
 
+// Drive set by the last Set_IODirectionAndValue(), reversed by getDifferentialSample()
+static uint8_t lastSetting = 0xFF;
+static uint8_t lastValues = 0;
+
+static void applyIO(uint8_t setting, uint8_t values);
+
 namespace MeasurementHardware {
 
 void Set_IODirectionAndValue(uint8_t setting, uint8_t values) {
+    lastSetting = setting;
+    lastValues = values;
+    applyIO(setting, values);
+}
+
+uint8_t reversedDriveValues(uint8_t setting, uint8_t values) {
+    uint8_t outputs = (uint8_t)~setting & 0x7F;  // 7 driver pins, a 0 bit is an output
+    if (__builtin_popcount(outputs) != 2 || __builtin_popcount(outputs & values) != 1) {
+        return 0;
+    }
+    return outputs & (uint8_t)~values;
+}
+
+}  // namespace MeasurementHardware
+
+static void applyIO(uint8_t setting, uint8_t values) {
     uint8_t mask = 1;
     for (int i = 0; i < 7; i++) {
         if (setting & mask) {
@@ -38,11 +60,15 @@ void Set_IODirectionAndValue(uint8_t setting, uint8_t values) {
     }
 }
 
+namespace MeasurementHardware {
+
 int getCalibratedVoltage(int raw_value, adc1_channel_t channel) {
     return esp_adc_cal_raw_to_voltage(raw_value, &adc_chars);
 }
 
-int getDifferentialSample(adc1_channel_t pin1, adc1_channel_t pin2, int nr_samples) {
+// Trimmed means of the raw readings of both pins: samples are sorted by pin1 (pin2 travels with
+// its pair) and 10 % is dropped at each end
+static void trimmedMeansRaw(adc1_channel_t pin1, adc1_channel_t pin2, int nr_samples, int& mean1, int& mean2) {
     // Collect samples from each pin
     for (int i = 0; i < nr_samples; i++) {
         esp_task_wdt_reset();
@@ -83,11 +109,44 @@ int getDifferentialSample(adc1_channel_t pin1, adc1_channel_t pin2, int nr_sampl
         sum2 += samples2[i];
     }
 
-    int trimmed_mean1 = sum1 / valid_samples;
-    int trimmed_mean2 = sum2 / valid_samples;
+    mean1 = sum1 / valid_samples;
+    mean2 = sum2 / valid_samples;
+}
 
-    int delta = (getCalibratedVoltage(trimmed_mean1, pin1) - getCalibratedVoltage(trimmed_mean2, pin2));
-    return delta;
+int getDifferentialSample(adc1_channel_t pin1, adc1_channel_t pin2, int nr_samples, DifferentialDetail* detail) {
+    if (nr_samples > MAX_NUM_ADC_SAMPLES) {
+        nr_samples = MAX_NUM_ADC_SAMPLES;
+    }
+    uint8_t reversed = reversedDriveValues(lastSetting, lastValues);
+    int forward_samples = (reversed != 0 && nr_samples >= 4) ? nr_samples / 2 : nr_samples;
+
+    int raw1, raw2;
+    trimmedMeansRaw(pin1, pin2, forward_samples, raw1, raw2);
+    int fwd1 = getCalibratedVoltage(raw1, pin1);
+    int fwd2 = getCalibratedVoltage(raw2, pin2);
+    if (detail != nullptr) {
+        detail->reversed = false;
+        detail->fwd_mv1 = fwd1;
+        detail->fwd_mv2 = fwd2;
+    }
+    if (forward_samples == nr_samples) {
+        return fwd1 - fwd2;
+    }
+
+    // Second half with the current reversed: every node voltage mirrors, so V2 - V1 is the
+    // forward difference again, measured at other ADC codes
+    applyIO(lastSetting, reversed);
+    trimmedMeansRaw(pin1, pin2, nr_samples - forward_samples, raw1, raw2);
+    applyIO(lastSetting, lastValues);
+    int rev1 = getCalibratedVoltage(raw1, pin1);
+    int rev2 = getCalibratedVoltage(raw2, pin2);
+    if (detail != nullptr) {
+        detail->reversed = true;
+        detail->rev_mv1 = rev1;
+        detail->rev_mv2 = rev2;
+    }
+    int sum = (fwd1 - fwd2) + (rev2 - rev1);
+    return sum >= 0 ? (sum + 1) / 2 : -((-sum + 1) / 2);  // average, rounded half away from zero
 }
 
 void init_AD() {

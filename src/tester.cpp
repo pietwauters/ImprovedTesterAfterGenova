@@ -151,10 +151,9 @@ void Tester::begin(bool ForceCalibration) {
     Display.begin();
     mycalibrator.begin(br_analog, bl_analog);
     calibrationService.begin();
-    calibrationStore.migrateLegacy(mycalibrator);
-    // Try to load existing calibration
+    // Try to load existing calibration (fitted on the current, bidirectional readings)
     StoredModel stored;
-    if ((ForceCalibration) || !calibrationStore.loadForPath(kDefaultCalibrationPath, stored)) {
+    if ((ForceCalibration) || !calibrationStore.loadActive(kDefaultCalibrationPath, stored)) {
         // No existing calibration, run interactive calibration
         mycalibrator.DoFactoryReset();
         DefaultBlinkColor = LedPanel->m_Red;
@@ -348,7 +347,7 @@ void Tester::handleCalibratingState() {
     }
     const CalibrationPath& path = calibrationService.path();
     EmpiricalResistorCalibrator::EmpiricalReading reading =
-        mycalibrator.measure(path, CalibrationService::SamplesPerReading, false, true);
+        mycalibrator.measure(path, CalibrationService::ReadingsPerSample, false);
     calibrationService.pushReading(path, reading);
 }
 

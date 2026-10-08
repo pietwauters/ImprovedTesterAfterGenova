@@ -51,130 +51,62 @@ const char* calVerdictName(CalVerdict verdict) {
     }
 }
 
-// Trimmed means of both channels over `samples` samples, plus the spread of the per-sample difference
-EmpiricalResistorCalibrator::ChannelMeans EmpiricalResistorCalibrator::sampleChannels(adc1_channel_t top,
-                                                                                      adc1_channel_t bottom,
-                                                                                      int samples) {
-    ChannelMeans result;
-    // Use the same successful approach as the working differential calibrator
-    const float trim_percent = 0.2f;  // Remove 20% outliers like the working differential calibrator
-
-    // Allocate arrays for calibrated voltage samples (in millivolts)
-    uint32_t* mv_top_samples = new uint32_t[samples];
-    uint32_t* mv_bottom_samples = new uint32_t[samples];
-
-    // Take samples from both channels and convert to millivolts immediately
-    double sum_diff = 0.0, sum_diff_sq = 0.0;
-    for (int i = 0; i < samples; ++i) {
-        esp_task_wdt_reset();  // Reset WDT every iteration
-
-        uint32_t raw_top = adc1_get_raw(top);
-        uint32_t raw_bottom = adc1_get_raw(bottom);
-
-        // Convert each raw sample to millivolts using eFuse calibration
-        mv_top_samples[i] = esp_adc_cal_raw_to_voltage(raw_top, &adc_chars);
-        mv_bottom_samples[i] = esp_adc_cal_raw_to_voltage(raw_bottom, &adc_chars);
-        double diff = (double)mv_top_samples[i] - (double)mv_bottom_samples[i];
-        sum_diff += diff;
-        sum_diff_sq += diff * diff;
-        if (i < samples - 1)
-            vTaskDelay(pdMS_TO_TICKS(1));
-    }
-    double mean_diff = sum_diff / samples;
-    double var_diff = sum_diff_sq / samples - mean_diff * mean_diff;
-    result.diff_sd_mv = var_diff > 0 ? (float)sqrt(var_diff) : 0.0f;
-
-    // Sort arrays to identify outliers (sorting millivolt values now)
-    for (int i = 0; i < samples - 1; i++) {
-        for (int j = 0; j < samples - i - 1; j++) {
-            if (mv_top_samples[j] > mv_top_samples[j + 1]) {
-                uint32_t temp = mv_top_samples[j];
-                mv_top_samples[j] = mv_top_samples[j + 1];
-                mv_top_samples[j + 1] = temp;
-            }
-            if (mv_bottom_samples[j] > mv_bottom_samples[j + 1]) {
-                uint32_t temp = mv_bottom_samples[j];
-                mv_bottom_samples[j] = mv_bottom_samples[j + 1];
-                mv_bottom_samples[j + 1] = temp;
-            }
-        }
-    }
-
-    // Calculate how many samples to trim from each end
-    int trim_count = (int)(samples * trim_percent / 2.0f);  // Divide by 2 since we trim both ends
-    int start_index = trim_count;
-    int end_index = samples - trim_count;
-    int valid_samples = end_index - start_index;
-
-    // Calculate trimmed mean of calibrated millivolt values
-    uint64_t sum_mv_top = 0, sum_mv_bottom = 0;
-    for (int i = start_index; i < end_index; i++) {
-        sum_mv_top += mv_top_samples[i];
-        sum_mv_bottom += mv_bottom_samples[i];
-    }
-
-    // Clean up arrays
-    delete[] mv_top_samples;
-    delete[] mv_bottom_samples;
-
-    // Convert millivolts to volts (keep the fraction of a mV the averaging gives)
-    result.v_top = (float)sum_mv_top / valid_samples / 1000.0f;
-    result.v_bottom = (float)sum_mv_bottom / valid_samples / 1000.0f;
-    result.used = valid_samples;
-    return result;
-}
-
-// The drive with the other of the two output pins high; 0 if the path does not drive exactly two pins
-static uint8_t reversedValues(const CalibrationPath& path) {
-    uint8_t outputs = (uint8_t)(~path.ioDirection) & 0x7F;  // 7 driver pins, a 0 bit is an output
-    if (__builtin_popcount(outputs) != 2 || __builtin_popcount(outputs & path.ioValues) != 1) {
-        return 0;
-    }
-    return outputs & (uint8_t)~path.ioValues;
-}
-
 EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::measure(const CalibrationPath& path,
-                                                                                   int samples, bool verbose,
-                                                                                   bool bidirectional) {
+                                                                                   int readings, bool verbose) {
+    const int samples_per_reading = 16;  // the default of getDifferentialSample, as the tests use it
     EmpiricalReading result = {};
-    uint8_t reversed = bidirectional ? reversedValues(path) : 0;
-    int forwardSamples = reversed != 0 ? samples / 2 : samples;
+    double fwd1 = 0, fwd2 = 0, rev1 = 0, rev2 = 0, sum = 0, sum_sq = 0;
 
     MeasurementHardware::Set_IODirectionAndValue(path.ioDirection, path.ioValues);
     vTaskDelay(pdMS_TO_TICKS(2));  // let the terminals settle after switching
-    ChannelMeans fwd = sampleChannels(path.top, path.bottom, forwardSamples);
-    result.v_top = fwd.v_top;
-    result.v_bottom = fwd.v_bottom;
-    result.v_diff = fwd.v_top - fwd.v_bottom;
-    result.v_diff_sd_mv = fwd.diff_sd_mv;
-    result.samples_used = fwd.used;
+    for (int i = 0; i < readings; i++) {
+        esp_task_wdt_reset();
+        MeasurementHardware::DifferentialDetail d;
+        int mv = MeasurementHardware::getDifferentialSample(path.top, path.bottom, samples_per_reading, &d);
+        sum += mv;
+        sum_sq += (double)mv * mv;
+        fwd1 += d.fwd_mv1;
+        fwd2 += d.fwd_mv2;
+        if (d.reversed) {
+            result.has_reversed = true;
+            rev1 += d.rev_mv1;
+            rev2 += d.rev_mv2;
+        }
+        if (i < readings - 1) {
+            vTaskDelay(pdMS_TO_TICKS(2));  // spread the readings over time, like a test does
+        }
+    }
+    double mean = sum / readings;
+    double var = sum_sq / readings - mean * mean;
+    result.v_diff_sd_mv = var > 0 ? (float)sqrt(var) : 0.0f;
+    result.samples_used = readings * samples_per_reading;
 
-    if (reversed != 0) {
-        // Same channels, current the other way: the bottom terminal is now the high one
-        MeasurementHardware::Set_IODirectionAndValue(path.ioDirection, reversed);
-        vTaskDelay(pdMS_TO_TICKS(2));
-        ChannelMeans rev = sampleChannels(path.top, path.bottom, samples - forwardSamples);
-        result.has_reversed = true;
-        result.v_top_rev = rev.v_top;
-        result.v_bottom_rev = rev.v_bottom;
-        result.v_diff_rev = rev.v_bottom - rev.v_top;
-        MeasurementHardware::Set_IODirectionAndValue(path.ioDirection, path.ioValues);
+    // Means of the halves (V). v_diff from the halves rather than from the rounded single readings
+    result.v_top = (float)(fwd1 / readings / 1000.0);
+    result.v_bottom = (float)(fwd2 / readings / 1000.0);
+    if (result.has_reversed) {
+        result.v_top_rev = (float)(rev1 / readings / 1000.0);
+        result.v_bottom_rev = (float)(rev2 / readings / 1000.0);
+        result.v_diff_rev = result.v_bottom_rev - result.v_top_rev;
+        result.v_diff = ((result.v_top - result.v_bottom) + result.v_diff_rev) / 2.0f;
+        result.v_high = (result.v_top + result.v_bottom_rev) / 2.0f;
+    } else {
+        result.v_diff = result.v_top - result.v_bottom;
+        result.v_high = result.v_top;
     }
 
     if (verbose) {
-        printf("Empirical differential result (trimmed mean): v_top=%.4f V, v_bottom=%.4f V, v_diff=%.4f V\n",
-               result.v_top, result.v_bottom, result.v_diff);
-        printf("  Used %d samples, V_diff spread %.2f mV\n", result.samples_used, result.v_diff_sd_mv);
+        printf("Differential reading: v_diff=%.2f mV (spread of single readings %.2f mV, %d readings)\n",
+               result.v_diff * 1000, result.v_diff_sd_mv, readings);
+        printf("  Forward: v_top=%.1f mV, v_bottom=%.1f mV\n", result.v_top * 1000, result.v_bottom * 1000);
         if (result.has_reversed) {
-            printf("  Reversed: v_top=%.4f V, v_bottom=%.4f V, v_diff=%.4f V\n", result.v_top_rev,
-                   result.v_bottom_rev, result.v_diff_rev);
+            printf("  Reversed: v_top=%.1f mV, v_bottom=%.1f mV\n", result.v_top_rev * 1000,
+                   result.v_bottom_rev * 1000);
         }
     }
 
     // For empirical model: V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
-    // The model is calibrated on the forward reading, the one the tester uses in its tests
     result.resistance = get_resistance_empirical(result.v_diff);
-
     return result;
 }
 
@@ -583,8 +515,8 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
     }
 
     printf("Measuring open circuit voltage...\n");
-    EmpiricalReading open_reading = measure(path, 50);
-    float v_gpio_open = open_reading.v_top;  // Use top voltage as reference
+    EmpiricalReading open_reading = measure(path, 64);
+    float v_gpio_open = open_reading.v_high;  // high side as reference (both directions averaged)
 
     printf("Open circuit measurements:\n");
     printf("  V_gpio_open = %.1f mV (reference voltage)\n", v_gpio_open * 1000);
@@ -627,7 +559,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
         wait_for_enter();
 
         // Measure differential voltage
-        EmpiricalReading reading = measure(path, 100);
+        EmpiricalReading reading = measure(path, 64);
 
         printf("Measured: R=%.2fΩ → V_diff=%.1fmV (V_top=%.1fmV, V_bottom=%.1fmV)\n", R_known, reading.v_diff * 1000,
                reading.v_top * 1000, reading.v_bottom * 1000);
@@ -679,7 +611,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
 
         // Measure the unknown resistor
         printf("Measuring unknown resistor...\n");
-        EmpiricalReading test_reading = measure(path, 100);
+        EmpiricalReading test_reading = measure(path, 64);
 
         if (test_reading.v_diff <= 0) {
             printf("Invalid reading: V_diff=%.1fmV. Check connections.\n", test_reading.v_diff * 1000);

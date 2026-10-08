@@ -239,7 +239,8 @@ def main():
             wait_until_open(tester)
             print()
 
-        fit = tester.post("/api/cal/fit", {"path": args.path, "open": {"v_top_mv": open_s["v_top_mv"]},
+        fit = tester.post("/api/cal/fit", {"path": args.path,
+                                           "open": {"v_high_mv": open_s.get("v_high_mv", open_s["v_top_mv"])},
                                            "points": points})
         print("Result      R ref    R new   error   (factory  previous)")
         for p in fit["points"]:
@@ -260,7 +261,8 @@ def main():
 
         m = fit["model"]
         record = {
-            "id": run_id, "ts": run_id, "kind": "calibrate", "set": set_name,
+            # fmt 2: pts[3] and open[2] are the bidirectional average (fmt 1: forward only)
+            "id": run_id, "ts": run_id, "fmt": 2, "kind": "calibrate", "set": set_name,
             "path": args.path, "mac": info["mac"], "hw": info["hw_rev"], "fw": info["fw"],
             "open": [open_s["v_top_mv"], open_s["v_bottom_mv"], open_s["v_diff_mv"]]
                     + ([open_s["v_top_rev_mv"], open_s["v_diff_rev_mv"]] if "v_diff_rev_mv" in open_s else []),

@@ -58,12 +58,25 @@ All responses are JSON. Units are in the names (`_mv`, `_ohm`, `_pct`).
 | POST | `/api/cal/feedback` | `{"event":"reset"\|"captured"\|"pass"\|"fail"}` | LED matrix: blue C, green flash on a capture, green or red C for the verdict |
 | POST | `/api/cal/end` | | Leave the `Calibrating` state |
 
-During a session every reading is taken in two halves: forward, then with
-the current reversed. `v_*_mv` are the forward half (what the model is
-calibrated on, matching how the tests measure); `v_top_rev_mv`,
-`v_bottom_rev_mv` and `v_diff_rev_mv` are the reversed half, on the same
-channels (so the bottom channel is the high one). Run records keep both;
-`tools/cal_analyze.py` compares forward, reversed and averaged fits.
+Every measurement of the tester (`MeasurementHardware::getDifferentialSample`)
+takes half of its samples forward and half with the current reversed, and
+returns the average. That cancels offset and gain differences between the two
+ADC channels and about half of the ADC's nonlinearity (RMS calibration error
+0.9 % -> 0.5 % on two hw_rev3 testers). Calibration averages many of exactly
+these readings, so the model matches what the tests measure.
+
+In `/api/cal/sample`, `v_diff_mv` is that averaged reading and `v_high_mv` the
+averaged high side (the open-circuit reference sent to `/fit` as
+`open.v_high_mv`). `v_top_mv`/`v_bottom_mv` are the forward half,
+`v_top_rev_mv`/`v_bottom_rev_mv`/`v_diff_rev_mv` the reversed half on the same
+channels (so the bottom channel is the high one). Run records (format 2) keep
+both halves; `tools/cal_analyze.py` compares forward, reversed and averaged fits.
+
+Models carry their type: `empirical-bidir` (current) or `empirical-v1` (fitted
+on forward-only readings before this change). `/api/cal/info` marks v1 models
+`outdated`; the tester does not use them and runs on the default model of its
+hardware revision until it is recalibrated. For hw_rev3 that default is a
+pooled fit of two calibrated testers (within 1.7 % on both).
 
 `stable` means the last 12 readings (about 1 s) of V_diff lie within
 1.5 mV or 0.3 %, whichever is larger. `open` means the path reads more than

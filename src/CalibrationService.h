@@ -18,9 +18,10 @@ enum CalFeedback { CalFeedbackNone, CalFeedbackReset, CalFeedbackCaptured, CalFe
 struct CalSample {
     bool valid;         // at least one reading since the path was selected
     uint32_t seq;       // increments with every reading
-    float v_top_mv;     // window means
+    float v_high_mv;    // high side, both directions averaged: the open-circuit reference of the model
+    float v_top_mv;     // window means, forward half
     float v_bottom_mv;
-    float v_diff_mv;
+    float v_diff_mv;    // the reading the model works on (bidirectional average)
     float range_mv;     // max - min of V_diff over the window
     float noise_sd_mv;  // per-sample V_diff spread of the latest reading
     int window;         // readings in the window
@@ -42,7 +43,7 @@ struct CalSample {
 class CalibrationService {
    public:
     static constexpr int WindowSize = 12;              // readings; about 1 s at 64 samples per reading
-    static constexpr int SamplesPerReading = 64;
+    static constexpr int ReadingsPerSample = 32;  // getDifferentialSample calls per reading, ~80 ms
     static constexpr float StableAbsMv = 1.5f;         // window range limit, or
     static constexpr float StableRelPercent = 0.3f;    // this share of V_diff, whichever is larger
     static constexpr float OpenOhm = 200.0f;           // above this the path counts as open
@@ -85,7 +86,7 @@ class CalibrationService {
     EmpiricalModel activeModel_ = EmpiricalResistorCalibrator::factoryModel();
 
     // ring of readings
-    float top_[WindowSize], bottom_[WindowSize], diff_[WindowSize];
+    float top_[WindowSize], bottom_[WindowSize], diff_[WindowSize], high_[WindowSize];
     float topRev_[WindowSize], bottomRev_[WindowSize], diffRev_[WindowSize];
     bool hasReversed_ = false;
     int count_ = 0, next_ = 0;

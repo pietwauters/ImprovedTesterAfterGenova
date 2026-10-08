@@ -5,9 +5,18 @@
 #include "esp_adc_cal.h"
 
 constexpr int CurrentVersion = 3;
+// Model used until a tester is calibrated
+#if HARDWARE_REV == 3
+// Pooled fit of two calibrated hw_rev3 testers on bidirectional readings (2026-10-08);
+// within 1.7 % on both without their own calibration (the old default was 37-40 % off)
+constexpr float Default_v_gpio = 3.137;
+constexpr float Default_r1_r2 = 92.052;
+constexpr float Default_correction = -7.772;
+#else
 constexpr float Default_v_gpio = 3.1290;
 constexpr float Default_r1_r2 = 116.0;
 constexpr float Default_correction = 1.0;
+#endif
 
 // Calibration verdict limits: every point's resistance error must stay within these
 constexpr float CalExcellentPercent = 2.0f;  // target
@@ -68,19 +77,20 @@ class EmpiricalResistorCalibrator {
         float v_diff_sd_mv;  // standard deviation of the per-sample V_diff (mV)
         int samples_used;    // samples left after trimming outliers
         float resistance;
-        // Second half with the drive reversed (bidirectional only): same channels, so here
-        // the bottom one is high and v_diff_rev = v_bottom_rev - v_top_rev
+        // Half measured with the drive reversed: same channels, so here the bottom one is high
+        // and v_diff_rev = v_bottom_rev - v_top_rev
         bool has_reversed;
         float v_top_rev;
         float v_bottom_rev;
         float v_diff_rev;
+        float v_high;  // open-circuit reference for the model: the high side, both directions averaged
     };
 
-    // Drive the terminals of a calibration path and measure it. Bidirectional: the first half of
-    // the samples forward, the second half with the current reversed (both reported separately;
-    // v_diff and resistance are always the forward reading, which is what the tests measure).
-    EmpiricalReading measure(const CalibrationPath& path, int samples = 100, bool verbose = true,
-                             bool bidirectional = false);
+    // Drive a calibration path and average `readings` calls of MeasurementHardware::getDifferentialSample,
+    // the function every test uses, so the model is calibrated on exactly what the tests measure.
+    // v_diff is that (bidirectional) reading; the forward and reversed halves are reported separately.
+    // v_diff_sd_mv is the spread of the single readings.
+    EmpiricalReading measure(const CalibrationPath& path, int readings = 64, bool verbose = true);
 
     // Model access
     EmpiricalModel model() const { return {v_gpio, r1_r2, correction}; }
@@ -125,13 +135,6 @@ class EmpiricalResistorCalibrator {
     // ADC calibration
     esp_adc_cal_characteristics_t adc_chars;
 
-    struct ChannelMeans {
-        float v_top;       // V, trimmed mean
-        float v_bottom;    // V, trimmed mean
-        float diff_sd_mv;  // spread of the per-sample top - bottom
-        int used;          // samples after trimming
-    };
-    ChannelMeans sampleChannels(adc1_channel_t top, adc1_channel_t bottom, int samples);
 
     // Helper functions
     float calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction) const;

@@ -95,12 +95,14 @@ CalSample CalibrationService::sample() {
     if (s.valid) {
         float lo = diff_[0], hi = diff_[0];
         for (int i = 0; i < count_; i++) {
+            s.v_high_mv += high_[i];
             s.v_top_mv += top_[i];
             s.v_bottom_mv += bottom_[i];
             s.v_diff_mv += diff_[i];
             lo = fminf(lo, diff_[i]);
             hi = fmaxf(hi, diff_[i]);
         }
+        s.v_high_mv /= count_;
         s.v_top_mv /= count_;
         s.v_bottom_mv /= count_;
         s.v_diff_mv /= count_;
@@ -207,6 +209,7 @@ void CalibrationService::pushReading(const CalibrationPath& path,
     top_[next_] = r.v_top * 1000.0f;
     bottom_[next_] = r.v_bottom * 1000.0f;
     diff_[next_] = r.v_diff * 1000.0f;
+    high_[next_] = r.v_high * 1000.0f;
     topRev_[next_] = r.v_top_rev * 1000.0f;
     bottomRev_[next_] = r.v_bottom_rev * 1000.0f;
     diffRev_[next_] = r.v_diff_rev * 1000.0f;
@@ -282,7 +285,7 @@ static void addRounded(cJSON* obj, const char* name, double value, int decimals)
 
 static cJSON* modelToJson(const EmpiricalModel& m) {
     cJSON* obj = cJSON_CreateObject();
-    cJSON_AddStringToObject(obj, "type", calModelTypeName(CalModelEmpiricalV1));
+    cJSON_AddStringToObject(obj, "type", calModelTypeName(CalModelEmpiricalBidir));
     addRounded(obj, "v_gpio_mv", m.v_gpio * 1000.0, 2);
     addRounded(obj, "r1_r2_ohm", m.r1_r2, 3);
     addRounded(obj, "correction_ohm2", m.correction, 3);
@@ -350,7 +353,10 @@ static void addModelInfo(cJSON* models, const CalibrationPath& path) {
         return;
     }
     cJSON* obj = modelToJson(m.params);
+    cJSON_ReplaceItemInObjectCaseSensitive(obj, "type", cJSON_CreateString(calModelTypeName(m.type)));
     cJSON_AddStringToObject(obj, "path", path.name);
+    // Fitted on forward-only readings: no longer used, the tester runs on the default model
+    cJSON_AddBoolToObject(obj, "outdated", m.type != CalModelEmpiricalBidir);
     cJSON_AddBoolToObject(obj, "migrated", (m.flags & CalModelMigrated) != 0);
     cJSON_AddNumberToObject(obj, "run_id", m.runId);
     cJSON_AddBoolToObject(obj, "has_previous", calibrationStore.hasPrevious(path));
@@ -378,9 +384,13 @@ static void handleFit(AsyncWebServerRequest* request, cJSON* body) {
         return;
     }
     cJSON* open = cJSON_GetObjectItemCaseSensitive(body, "open");
-    cJSON* openTop = cJSON_GetObjectItemCaseSensitive(open, "v_top_mv");
+    // v_high_mv: the open-circuit high side, both directions averaged (v_top_mv: older clients)
+    cJSON* openTop = cJSON_GetObjectItemCaseSensitive(open, "v_high_mv");
     if (!cJSON_IsNumber(openTop)) {
-        sendError(request, 400, "open.v_top_mv required");
+        openTop = cJSON_GetObjectItemCaseSensitive(open, "v_top_mv");
+    }
+    if (!cJSON_IsNumber(openTop)) {
+        sendError(request, 400, "open.v_high_mv required");
         return;
     }
     float v_open = (float)openTop->valuedouble / 1000.0f;
@@ -403,7 +413,7 @@ static void handleFit(AsyncWebServerRequest* request, cJSON* body) {
         cJSON* v = cJSON_GetObjectItemCaseSensitive(point, "v_diff_mv");
         if (!cJSON_IsNumber(r) || !cJSON_IsNumber(v) || r->valuedouble <= 0 || v->valuedouble <= 0 ||
             v->valuedouble / 1000.0 >= v_open) {
-            sendError(request, 400, "each point needs r_ohm > 0 and 0 < v_diff_mv < open.v_top_mv");
+            sendError(request, 400, "each point needs r_ohm > 0 and 0 < v_diff_mv < open.v_high_mv");
             return;
         }
         r_ref[i] = (float)r->valuedouble;
@@ -485,11 +495,15 @@ static void handleUndo(AsyncWebServerRequest* request, cJSON* body) {
         return;
     }
     if (path == &kDefaultCalibrationPath) {
-        calibrationService.queueModel(restored.params);
+        // An outdated (forward-only) model is not used: the tester falls back to the default
+        calibrationService.queueModel(restored.type == CalModelEmpiricalBidir
+                                          ? restored.params
+                                          : EmpiricalResistorCalibrator::factoryModel());
     }
     cJSON* obj = cJSON_CreateObject();
     cJSON_AddStringToObject(obj, "path", path->name);
     cJSON_AddItemToObject(obj, "model", modelToJson(restored.params));
+    cJSON_AddBoolToObject(obj, "outdated", restored.type != CalModelEmpiricalBidir);
     sendJson(request, 200, obj);
 }
 
@@ -507,6 +521,7 @@ static void handleSample(AsyncWebServerRequest* request) {
     CalSample s = calibrationService.sample();
     if (active && s.valid) {
         cJSON_AddNumberToObject(obj, "seq", s.seq);
+        addRounded(obj, "v_high_mv", s.v_high_mv, 2);
         addRounded(obj, "v_top_mv", s.v_top_mv, 2);
         addRounded(obj, "v_bottom_mv", s.v_bottom_mv, 2);
         addRounded(obj, "v_diff_mv", s.v_diff_mv, 2);

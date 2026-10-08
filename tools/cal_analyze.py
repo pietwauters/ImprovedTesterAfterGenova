@@ -6,10 +6,9 @@
 
 For every run it refits the model the way the firmware does (least squares on
 the relative resistance error, V_gpio = open-circuit high side) and prints the
-error per resistor. Runs recorded with the reversed half (firmware with
-bidirectional calibration readings) are fitted three ways: forward only,
-reversed only and the average of both, to see whether reversing the current
-cancels the ADC's bumps.
+error per resistor. Runs recorded with the reversed half are fitted three ways:
+forward only, reversed only and the average of both. The firmware calibrates on
+the average (bidirectional readings) since run record format 2.
 """
 
 import json
@@ -119,7 +118,7 @@ def main():
               f"path {run.get('path')}  saved {run.get('saved')}")
         print("  resistors  " + " ".join(f"{r:6.2f}" for r in R) + " Ohm")
         op = run["open"]
-        fwd = [p[3] / 1000 for p in pts]
+        fwd = [(p[1] - p[2]) / 1000 for p in pts]  # forward half (in fmt 2 records p[3] is the average)
         report("forward", R, fwd, op[0] / 1000)
         if len(op) >= 5 and all(len(p) >= 7 for p in pts):
             # reversed half: same channels, the bottom one is high; high side = v_top_rev + v_diff_rev
@@ -127,7 +126,7 @@ def main():
             vg_rev = (op[3] + op[4]) / 1000
             report("reversed", R, rev, vg_rev)
             report("average", R, [(a + b) / 2 for a, b in zip(fwd, rev)], (op[0] / 1000 + vg_rev) / 2)
-            print("  forward - reversed V_diff  " + " ".join(f"{(p[3] - p[6]):+6.2f}" for p in pts) + " mV")
+            print("  forward - reversed V_diff  " + " ".join(f"{(p[1] - p[2] - p[6]):+6.2f}" for p in pts) + " mV")
 
 
 if __name__ == "__main__":

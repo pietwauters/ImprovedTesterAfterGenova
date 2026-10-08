@@ -44,6 +44,10 @@ Recently refactored (`refactor/measurement-architecture` branch, merged into
 `main`) into clean layers:
 
 - **`MeasurementHardware`** — lowest level, talks to the ADC/switching hardware.
+  `getDifferentialSample` is bidirectional: half the samples with the drive set
+  by the last `Set_IODirectionAndValue`, half with it reversed (the other output
+  pin high), averaged. Cancels channel offsets and part of the ADC
+  nonlinearity; calibration models are fitted on these readings.
 - **`MeasurementCapture`** (`MeasurementCapture.h/.cpp`) — orchestrates hardware
   reads into a `MeasurementSet`: `captureAll` (all 15 terminal-pair
   combinations), `captureMatrix3x3` (9 right-vs-left pairs, used for mode
@@ -61,7 +65,10 @@ Recently refactored (`refactor/measurement-architecture` branch, merged into
   readings to Ohms (`get_resistance_empirical`) and Ohm thresholds to mV
   (`get_mv_threshold`), using an empirically fitted model (`v_gpio`, `r1_r2`,
   `correction`). Pure model maths (`fit`, `evaluate`, `modelResistance`) plus
-  `measure(path)`; verdict per point ≤ 2 % excellent, ≤ 5 % pass, else fail.
+  `measure(path)` (averages `getDifferentialSample` readings); verdict per point
+  ≤ 2 % excellent, ≤ 5 % pass, else fail. `Default_*` is the model used until a
+  tester is calibrated; per hardware revision (hw_rev3: pooled fit of two
+  calibrated testers).
 
 ## Calibration over Wi-Fi
 
@@ -74,7 +81,8 @@ header). Resistor sets and run history live in the operator's browser.
   the model used for all thresholds) and `Bl-Br` (= socket C, what the old
   serial calibration measured).
 - **`CalibrationStore`** — NVS `cal_store`: model per path + previous (undo),
-  ring of 6 run records; migrates the legacy `emp_cal` once.
+  ring of 6 run records. Model type `empirical-bidir` is used;
+  `empirical-v1` (forward-only readings) is kept but ignored as outdated.
 - **`CalibrationService`** — `/api/cal/*` handlers (async_tcp task) only
   request; the tester task's `Calibrating` state owns the hardware, samples
   continuously, applies saved models, mirrors progress on the LED matrix and

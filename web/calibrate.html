@@ -278,8 +278,8 @@ async function refreshInfo() {
   $("device").textContent = (info.name || "Tester") + " · hw rev " + info.hw_rev + " · fw " + info.fw;
   const m = (info.models || []).find(x => x.path === info.default_path);
   let text;
-  if (!m) text = "Not calibrated: it uses factory values, which can be far off.";
-  else if (m.migrated) text = "Uses the calibration made before the web calibration existed (on a different socket pair). A new calibration is recommended.";
+  if (!m) text = "Not calibrated: it uses the standard values for this hardware. A calibration makes it more accurate.";
+  else if (m.outdated) text = "Its calibration was made with the previous measuring method and is no longer used. Until you recalibrate, it uses the standard values for this hardware.";
   else text = "Calibrated.";
   $("tester-status").textContent = text;
   $("btn-undo").classList.toggle("hidden", !(m && m.has_previous));
@@ -519,7 +519,8 @@ async function startCalibration() {
     const open = await waitFor(s => s.open, (s, holds, fresh) => {
       setReading(s.open ? "Open" : "≈ " + fmtR(s.r_est_ohm), s.open ? (s.stable ? "Stable" : "Settling…") : "Something is still connected", fresh);
     });
-    session.open = { v_top_mv: open.v_top_mv, v_bottom_mv: open.v_bottom_mv, v_diff_mv: open.v_diff_mv,
+    session.open = { v_high_mv: open.v_high_mv !== undefined ? open.v_high_mv : open.v_top_mv,
+                     v_top_mv: open.v_top_mv, v_bottom_mv: open.v_bottom_mv, v_diff_mv: open.v_diff_mv,
                      v_top_rev_mv: open.v_top_rev_mv, v_diff_rev_mv: open.v_diff_rev_mv };
     feedback("captured");
     for (let i = 0; i < set.values.length; i++) await captureResistor(i, total);
@@ -534,7 +535,7 @@ async function startCalibration() {
 
 let lastFit = null;
 async function showResult() {
-  const fit = await api("POST", "/api/cal/fit", { path: session.path, open: { v_top_mv: session.open.v_top_mv }, points: session.points });
+  const fit = await api("POST", "/api/cal/fit", { path: session.path, open: { v_high_mv: session.open.v_high_mv }, points: session.points });
   lastFit = fit;
   feedback(fit.verdict === "fail" ? "fail" : "pass");
   const labels = { excellent: ["Excellent", "ok"], pass: ["Pass", "mid"], fail: ["Fail", "ko"] };
@@ -563,7 +564,8 @@ async function showResult() {
 function runRecord() {
   const m = lastFit.model, p = session.prev;
   return {
-    id: session.runId, ts: session.runId, kind: "calibrate", src: "web", set: session.set.name, path: session.path,
+    // fmt 2: pts[3] and open[2] are the bidirectional average (fmt 1: forward only)
+    id: session.runId, ts: session.runId, fmt: 2, kind: "calibrate", src: "web", set: session.set.name, path: session.path,
     mac: info.mac, hw: info.hw_rev, fw: info.fw,
     open: session.open.v_diff_rev_mv !== undefined
       ? [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv, session.open.v_top_rev_mv, session.open.v_diff_rev_mv]
