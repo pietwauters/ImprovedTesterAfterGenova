@@ -147,6 +147,9 @@ class Tester {
     void handleCalibratingState();
     void leaveCalibratingState();
     void applyQueuedModel();
+    void showCalibrationLed(uint32_t color);
+    uint32_t calLedColor_ = 0;           // C colour while calibrating: blue, or the verdict
+    unsigned long calFlashUntil_ = 0;    // green "captured" flash ends here (0 = none)
     bool debouncedCondition(std::function<bool()> condition, int debounceMs = 10);
 
     // Static task wrapper

@@ -199,6 +199,7 @@ def main():
     if args.path not in info["paths"]:
         raise SystemExit(f"Unknown path {args.path}; the tester offers {', '.join(info['paths'])}")
     prev = info["active_model"]
+    socket = info.get("sockets", {}).get(args.path, "A")  # FIE socket letter for this path
 
     tester.post("/api/cal/begin", {"path": args.path})
     stop = threading.Event()
@@ -219,7 +220,7 @@ def main():
 
         points, raw = [], []
         for i, r in enumerate(resistors, 1):
-            print(f"Step {i + 1}: connect the {r:g} Ohm resistor between top C and bottom C.")
+            print(f"Step {i + 1}: connect the {r:g} Ohm resistor between socket {socket} on top and on the bottom.")
             s = wait_for(tester, lambda s: not s.get("open"), f"{r:g} Ohm")
             guess = closest(s["r_est_ohm"], resistors)
             if guess != r and abs(s["r_est_ohm"] - guess) < abs(s["r_est_ohm"] - r):

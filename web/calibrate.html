@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tester Calibration</title>
+<style>
+:root {
+  --bg: #f4f5f7; --card: #ffffff; --text: #1d2125; --muted: #5e6670; --line: #d9dde2;
+  --accent: #1f6feb; --accent-text: #ffffff; --good: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+  --good-bg: #e6f4ea; --warn-bg: #fff4d6; --bad-bg: #fde8e8; --accent-bg: #e7f0fd;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418; --card: #1b1f24; --text: #e6e8eb; --muted: #9aa3ad; --line: #30363d;
+    --accent: #4c8dff; --accent-text: #0b0e12; --good: #4ac26b; --warn: #d4a72c; --bad: #ff6b6b;
+    --good-bg: #13291b; --warn-bg: #2d2410; --bad-bg: #331617; --accent-bg: #16243a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 560px; margin: 0 auto; padding: 16px; }
+header h1 { font-size: 20px; margin: 4px 0 2px; }
+header .device { color: var(--muted); font-size: 14px; min-height: 20px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 14px 0; }
+.card h2 { font-size: 17px; margin: 0 0 8px; }
+.muted { color: var(--muted); font-size: 14px; }
+button { font: inherit; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text);
+  padding: 12px 16px; min-height: 48px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.link { border: none; background: none; color: var(--accent); padding: 8px 0; min-height: 0; }
+button:disabled { opacity: .5; cursor: default; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; }
+.row > button { flex: 1 1 140px; }
+.stack > * + * { margin-top: 10px; }
+select, input, textarea { font: inherit; width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); }
+label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 14px; }
+.chip.done { border-color: var(--good); color: var(--good); }
+.chip.now { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.banner { border-radius: 10px; padding: 10px 12px; margin: 12px 0; font-size: 15px; }
+.banner.bad { background: var(--bad-bg); color: var(--bad); }
+.banner.warn { background: var(--warn-bg); color: var(--warn); }
+.banner.good { background: var(--good-bg); color: var(--good); }
+.step-count { color: var(--muted); font-size: 14px; }
+.instruction { font-size: 22px; font-weight: 600; margin: 4px 0 8px; }
+.progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 6px 0 12px; }
+.progress > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.reading { text-align: center; padding: 14px 8px; border-radius: 10px; background: var(--accent-bg); }
+.reading .value { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.reading .state { font-size: 15px; color: var(--muted); min-height: 22px; }
+.settle { height: 4px; background: var(--line); border-radius: 2px; margin: 8px auto 0; max-width: 220px; overflow: hidden; }
+.settle > div { height: 100%; background: var(--good); width: 0; }
+svg.sockets { display: block; width: 100%; max-width: 360px; margin: 6px auto 10px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 7px 4px; border-bottom: 1px solid var(--line); font-size: 15px; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 500; font-size: 13px; }
+.ok { color: var(--good); } .mid { color: var(--warn); } .ko { color: var(--bad); }
+.verdict { font-size: 26px; font-weight: 700; margin: 0; }
+details { margin-top: 12px; } summary { cursor: pointer; color: var(--accent); }
+.hidden { display: none !important; }
+.setline { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.setline .vals { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Tester calibration</h1>
+    <div class="device" id="device">Connecting to the tester…</div>
+  </header>
+  <div class="banner bad hidden" id="lost">Lost connection to the tester. Is this device still on the <b>Tester</b> Wi-Fi?</div>
+
+  <!-- Start -->
+  <section id="s-start" class="hidden">
+    <div class="card" id="status-card"><h2>This tester</h2><div id="tester-status" class="muted"></div></div>
+    <div class="card stack">
+      <h2>Resistor set</h2>
+      <select id="set-select" aria-label="Resistor set"></select>
+      <div class="chips" id="set-chips"></div>
+      <button class="link" id="btn-manage">Manage resistor sets</button>
+    </div>
+    <div class="banner warn hidden" id="captive">Open this page in your normal browser (Chrome, Safari, Firefox) so your resistor sets are remembered.</div>
+    <button class="primary" id="btn-start" style="width:100%">Start calibration</button>
+    <div class="row" style="margin-top:10px">
+      <button id="btn-undo" class="hidden">Undo last calibration</button>
+      <button id="btn-history">Calibration history</button>
+    </div>
+  </section>
+
+  <!-- Manage sets -->
+  <section id="s-sets" class="hidden">
+    <div class="card stack">
+      <h2>Your resistor sets</h2>
+      <p class="muted">Stored in this browser, not on the tester. Use the values you measured with a good meter when you have them.</p>
+      <div id="set-list"></div>
+    </div>
+    <div class="card stack">
+      <h2 id="edit-title">New set</h2>
+      <div><label for="edit-name">Name</label><input id="edit-name" maxlength="24" placeholder="My resistors"></div>
+      <div><label for="edit-values">Values in Ω, 4 to 8, separated by commas or spaces</label>
+        <input id="edit-values" inputmode="decimal" placeholder="1.05, 2.06, 3.27, 4.75, 5.76, 7.96"></div>
+      <div class="banner bad hidden" id="edit-error"></div>
+      <div class="row"><button class="primary" id="btn-save-set">Save set</button><button id="btn-new-set">Clear</button></div>
+    </div>
+    <div class="card stack">
+      <h2>Keep a copy</h2>
+      <p class="muted">Bookmark this link to restore the selected set on any device, even when the browser has forgotten it:</p>
+      <input id="bookmark" readonly>
+      <div class="row"><button id="btn-export">Export sets and history</button><button id="btn-import">Import</button></div>
+      <input type="file" id="import-file" accept="application/json,.json" class="hidden">
+    </div>
+    <button id="btn-sets-back" style="width:100%">Back</button>
+  </section>
+
+  <!-- Wizard -->
+  <section id="s-wizard" class="hidden">
+    <div class="card">
+      <div class="step-count" id="step-count"></div>
+      <div class="progress"><div id="progress"></div></div>
+      <div class="instruction" id="instruction"></div>
+      <div class="muted" id="hint"></div>
+      <svg class="sockets hidden" id="sockets" viewBox="0 0 360 150" role="img" aria-label="Where to connect the resistor"></svg>
+      <div class="reading">
+        <div class="value" id="reading-value">–</div>
+        <div class="state" id="reading-state"></div>
+        <div class="settle"><div id="settle"></div></div>
+      </div>
+      <div class="banner warn hidden" id="wrong">
+        <div id="wrong-text"></div>
+        <div class="row" style="margin-top:8px"><button id="btn-remeasure">Measure again</button><button id="btn-keep">Keep this reading</button></div>
+      </div>
+      <div class="chips" id="step-chips"></div>
+    </div>
+    <button id="btn-cancel" style="width:100%">Cancel calibration</button>
+  </section>
+
+  <!-- Result -->
+  <section id="s-result" class="hidden">
+    <div class="card">
+      <p class="verdict" id="verdict"></p>
+      <p class="muted" id="verdict-text"></p>
+      <table>
+        <thead><tr><th>Resistor</th><th>Tester reads</th><th>Error</th></tr></thead>
+        <tbody id="result-rows"></tbody>
+      </table>
+      <details><summary>Details</summary>
+        <table style="margin-top:8px">
+          <thead><tr><th>Model</th><th>Worst error</th><th>RMS</th></tr></thead>
+          <tbody id="compare-rows"></tbody>
+        </table>
+        <p class="muted" id="params"></p>
+      </details>
+    </div>
+    <div class="banner good hidden" id="saved-note">Saved. The tester uses the new calibration now.</div>
+    <div class="row" id="result-actions">
+      <button class="primary" id="btn-save">Save calibration</button>
+      <button id="btn-repeat">Repeat</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="btn-check">Check a resistor</button>
+      <button id="btn-result-undo" class="hidden">Undo</button>
+      <button id="btn-finish">Finish</button>
+    </div>
+  </section>
+
+  <!-- Check -->
+  <section id="s-check" class="hidden">
+    <div class="card">
+      <div class="instruction">Connect any resistor</div>
+      <div class="muted" id="check-hint"></div>
+      <div class="reading" style="margin-top:12px">
+        <div class="value" id="check-value">–</div>
+        <div class="state" id="check-state"></div>
+      </div>
+    </div>
+    <button id="btn-check-back" style="width:100%">Back to the result</button>
+  </section>
+
+  <!-- History -->
+  <section id="s-history" class="hidden">
+    <div class="card">
+      <h2>Calibration history</h2>
+      <p class="muted">Runs from every tester calibrated with this browser, newest first. Export them from <i>Manage resistor sets</i>.</p>
+      <table><thead><tr><th>Date</th><th>Tester</th><th>Worst</th><th>Result</th></tr></thead><tbody id="history-rows"></tbody></table>
+    </div>
+    <button id="btn-history-back" style="width:100%">Back</button>
+  </section>
+
+  <!-- Done -->
+  <section id="s-done" class="hidden">
+    <div class="card"><h2>The tester is back in normal mode</h2><p class="muted" id="done-text"></p></div>
+    <button class="primary" id="btn-again" style="width:100%">Back to start</button>
+  </section>
+</main>
+
+<script>
+"use strict";
+const WINDOW = 12;          // readings in the tester's averaging window
+const POLL_MS = 300;
+const BUILTIN_SET = { name: "Example 1-12 Ω", values: [1, 2, 3, 5, 8, 10, 12] };
+const $ = id => document.getElementById(id);
+
+// ---------- storage (per browser; may be unavailable) ----------
+function load(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
+}
+function store(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ } }
+function getSets() {
+  const d = load("tcal.sets", null);
+  return d && d.sets ? d : { last: null, sets: {} };
+}
+function putSets(d) { store("tcal.sets", d); }
+function getRuns() { return load("tcal.runs", []); }
+function putRuns(r) { store("tcal.runs", r); }
+
+function parseValues(text) {
+  const parts = String(text).split(/[\s,;]+/).filter(Boolean);
+  const vals = parts.map(Number);
+  if (vals.some(v => !isFinite(v) || v <= 0)) return { error: "Only positive numbers, e.g. 1.05, 2.2, 4.7, 10" };
+  if (vals.length < 4 || vals.length > 8) return { error: "Give 4 to 8 values (you gave " + vals.length + ")." };
+  vals.sort((a, b) => a - b);
+  return { values: vals };
+}
+const fmt = (v, d) => Number(v).toFixed(d);
+const fmtR = v => (v < 10 ? fmt(v, 3) : fmt(v, 2)) + " Ω";
+const nice = v => String(+Number(v).toPrecision(4));
+
+// A set in the link (#set=Name:1.05,2.06,...) is added and selected
+function importSetFromHash() {
+  const m = location.hash.match(/^#set=([^:]+):(.+)$/);
+  if (!m) return;
+  const name = decodeURIComponent(m[1]);
+  const p = parseValues(decodeURIComponent(m[2]));
+  if (p.error) return;
+  const d = getSets();
+  d.sets[name] = p.values; d.last = name; putSets(d);
+}
+
+function currentSet() {
+  const d = getSets();
+  if (d.last && d.sets[d.last]) return { name: d.last, values: d.sets[d.last] };
+  const names = Object.keys(d.sets);
+  if (names.length) return { name: names[0], values: d.sets[names[0]] };
+  return BUILTIN_SET;
+}
+
+// ---------- tester API ----------
+async function api(method, path, body) {
+  const opt = { method, headers: {} };
+  if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  let res;
+  try {
+    res = await fetch(path, opt);
+  } catch (e) {
+    $("lost").classList.remove("hidden");
+    throw e;
+  }
+  $("lost").classList.add("hidden");
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { const err = new Error(data.error || ("HTTP " + res.status)); err.status = res.status; throw err; }
+  return data;
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function feedback(event) { api("POST", "/api/cal/feedback", { event }).catch(() => {}); }
+
+// ---------- screens ----------
+const screens = ["s-start", "s-sets", "s-wizard", "s-result", "s-check", "s-history", "s-done"];
+function show(id) { screens.forEach(s => $(s).classList.toggle("hidden", s !== id)); window.scrollTo(0, 0); }
+
+let info = null;
+async function refreshInfo() {
+  info = await api("GET", "/api/cal/info");
+  $("device").textContent = (info.name || "Tester") + " · hw rev " + info.hw_rev + " · fw " + info.fw;
+  const m = (info.models || []).find(x => x.path === info.default_path);
+  let text;
+  if (!m) text = "Not calibrated: it uses factory values, which can be far off.";
+  else if (m.migrated) text = "Uses the calibration made before the web calibration existed (on a different socket pair). A new calibration is recommended.";
+  else text = "Calibrated.";
+  $("tester-status").textContent = text;
+  $("btn-undo").classList.toggle("hidden", !(m && m.has_previous));
+  return info;
+}
+
+function renderSetPicker() {
+  const d = getSets(), cur = currentSet(), sel = $("set-select");
+  sel.innerHTML = "";
+  const names = Object.keys(d.sets);
+  if (!names.length) names.push(BUILTIN_SET.name);
+  names.forEach(n => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
+  sel.value = cur.name;
+  $("set-chips").innerHTML = cur.values.map(v => '<span class="chip">' + nice(v) + " Ω</span>").join("");
+}
+$("set-select").onchange = () => {
+  const d = getSets();
+  if (d.sets[$("set-select").value]) { d.last = $("set-select").value; putSets(d); }
+  renderSetPicker();
+};
+
+// ---------- manage sets ----------
+let editing = null;
+function renderSetList() {
+  const d = getSets(), list = $("set-list");
+  list.innerHTML = "";
+  const names = Object.keys(d.sets);
+  if (!names.length) list.innerHTML = '<p class="muted">No sets yet. Until you add one, the example set 1, 2, 3, 5, 8, 10, 12 Ω is used.</p>';
+  names.forEach(n => {
+    const line = document.createElement("div"); line.className = "setline";
+    const left = document.createElement("div");
+    left.innerHTML = "<div></div><div class='vals'></div>";
+    left.firstChild.textContent = n + (n === d.last ? " (selected)" : "");
+    left.lastChild.textContent = d.sets[n].map(nice).join(", ") + " Ω";
+    const btns = document.createElement("div"); btns.className = "row"; btns.style.flexWrap = "nowrap";
+    const e = document.createElement("button"); e.textContent = "Edit";
+    e.onclick = () => { editing = n; $("edit-title").textContent = "Edit set"; $("edit-name").value = n;
+      $("edit-values").value = d.sets[n].map(nice).join(", "); };
+    const x = document.createElement("button"); x.textContent = "Delete";
+    x.onclick = () => { if (!confirmInline(x)) return; const dd = getSets(); delete dd.sets[n];
+      if (dd.last === n) dd.last = null; putSets(dd); renderSetList(); };
+    btns.append(e, x); line.append(left, btns); list.appendChild(line);
+  });
+  const cur = currentSet();
+  $("bookmark").value = location.origin + location.pathname + "#set=" + encodeURIComponent(cur.name) + ":" + cur.values.map(nice).join(",");
+}
+// Two taps to delete, no browser dialog
+function confirmInline(btn) {
+  if (btn.dataset.armed) return true;
+  btn.dataset.armed = "1"; btn.textContent = "Tap again"; setTimeout(() => { delete btn.dataset.armed; btn.textContent = "Delete"; }, 3000);
+  return false;
+}
+function clearEditor() { editing = null; $("edit-title").textContent = "New set"; $("edit-name").value = ""; $("edit-values").value = ""; $("edit-error").classList.add("hidden"); }
+$("btn-manage").onclick = () => { clearEditor(); renderSetList(); show("s-sets"); };
+$("btn-new-set").onclick = clearEditor;
+$("btn-save-set").onclick = () => {
+  const name = $("edit-name").value.trim(), p = parseValues($("edit-values").value), err = $("edit-error");
+  if (!name) { err.textContent = "Give the set a name."; err.classList.remove("hidden"); return; }
+  if (name.includes(":")) { err.textContent = "A name cannot contain ':'."; err.classList.remove("hidden"); return; }
+  if (p.error) { err.textContent = p.error; err.classList.remove("hidden"); return; }
+  const d = getSets();
+  if (editing && editing !== name) delete d.sets[editing];
+  d.sets[name] = p.values; d.last = name; putSets(d);
+  clearEditor(); renderSetList();
+};
+$("btn-sets-back").onclick = () => { renderSetPicker(); show("s-start"); };
+$("bookmark").onclick = () => $("bookmark").select();
+$("btn-export").onclick = () => {
+  const blob = new Blob([JSON.stringify({ sets: getSets(), runs: getRuns() }, null, 1)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = "tester-calibration-" + new Date().toISOString().slice(0, 10) + ".json"; a.click();
+};
+$("btn-import").onclick = () => $("import-file").click();
+$("import-file").onchange = async () => {
+  const f = $("import-file").files[0]; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    const d = getSets();
+    Object.entries((data.sets && data.sets.sets) || {}).forEach(([n, v]) => { const p = parseValues(v.join(",")); if (!p.error) d.sets[n] = p.values; });
+    putSets(d);
+    mergeRuns(data.runs || []);
+    renderSetList();
+  } catch (e) { const err = $("edit-error"); err.textContent = "Could not read that file."; err.classList.remove("hidden"); }
+  $("import-file").value = "";
+};
+function mergeRuns(list) {
+  const runs = getRuns(), seen = new Set(runs.map(r => r.mac + "/" + r.id));
+  list.forEach(r => { if (r && r.id && !seen.has(r.mac + "/" + r.id)) { runs.push(r); seen.add(r.mac + "/" + r.id); } });
+  runs.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  putRuns(runs);
+}
+
+// ---------- socket picture ----------
+// letter: the socket (A, B or C as printed on the tester) the resistor goes between
+function drawSockets(letter) {
+  const xs = { A: 110, B: 185, C: 285 };  // to scale: A-B 15 mm, B-C 20 mm (5 px per mm)
+  let s = "";
+  [["Top", 38], ["Bottom", 118]].forEach(([name, y]) => {
+    s += '<text x="10" y="' + (y + 5) + '" font-size="14" fill="currentColor">' + name + "</text>";
+    ["A", "B", "C"].forEach(l => {
+      const hot = l === letter;
+      s += '<circle cx="' + xs[l] + '" cy="' + y + '" r="13" fill="' + (hot ? "var(--accent)" : "none") + '" stroke="' + (hot ? "var(--accent)" : "var(--muted)") + '" stroke-width="2"/>';
+      s += '<text x="' + xs[l] + '" y="' + (y + 5) + '" text-anchor="middle" font-size="13" font-weight="600" fill="' + (hot ? "var(--accent-text)" : "var(--muted)") + '">' + l + "</text>";
+    });
+  });
+  const x = xs[letter];
+  s += '<path d="M' + x + ' 51 V62 l-8 4 l16 6 l-16 6 l16 6 l-16 6 l8 4 V105" fill="none" stroke="var(--warn)" stroke-width="3" stroke-linejoin="round"/>';
+  $("sockets").innerHTML = s;
+  $("sockets").style.color = "var(--text)";
+}
+
+// ---------- calibration session ----------
+let session = null;  // { set, path, open, points:[], raw:[], aborted }
+let keepAliveTimer = null;
+
+function setReading(valueText, stateText, settle) {
+  $("reading-value").textContent = valueText;
+  $("reading-state").textContent = stateText;
+  $("settle").style.width = Math.round(Math.max(0, Math.min(1, settle)) * 100) + "%";
+}
+
+// Poll until want(sample) holds on a stable window measured after it started holding
+async function waitFor(want, describe) {
+  let since = null;
+  while (!session.aborted) {
+    let s;
+    try { s = await api("GET", "/api/cal/sample"); } catch (e) { await sleep(1000); continue; }
+    if (!s.active) throw new Error("The tester left calibration mode.");
+    const holds = s.window > 0 && want(s);
+    if (holds && since === null) since = s.seq;
+    if (!holds) since = null;
+    const fresh = since === null ? 0 : Math.min(1, (s.seq - since) / WINDOW);
+    describe(s, holds, fresh);
+    if (holds && s.stable && s.seq - since >= WINDOW) return s;
+    await sleep(POLL_MS);
+  }
+  throw new Error("aborted");
+}
+
+function stepView(index, total, instruction, hint, showSockets) {
+  $("step-count").textContent = "Step " + index + " of " + total;
+  $("progress").style.width = Math.round((index - 1) / total * 100) + "%";
+  $("instruction").textContent = instruction;
+  $("hint").textContent = hint;
+  $("sockets").classList.toggle("hidden", !showSockets);
+  $("wrong").classList.add("hidden");
+}
+
+function renderStepChips() {
+  const n = session.points.length;
+  $("step-chips").innerHTML = session.set.values.map((v, i) =>
+    '<span class="chip ' + (i < n ? "done" : i === n ? "now" : "") + '">' + (i < n ? "✓ " : "") + nice(v) + " Ω</span>").join("");
+}
+
+// Series resistance of a plain divider, estimated from this run's points: R = Rs * V / (Vg - V)
+function estimateR(vDiff) {
+  const vg = session.open.v_top_mv;
+  if (!session.points.length || vDiff <= 0 || vDiff >= vg) return null;
+  const rs = session.points.map(p => p.r_ohm * (vg - p.v_diff_mv) / p.v_diff_mv).sort((a, b) => a - b);
+  const median = rs[Math.floor(rs.length / 2)];
+  return median * vDiff / (vg - vDiff);
+}
+
+function askWrong(expected, guess) {
+  return new Promise(resolve => {
+    $("wrong-text").textContent = "This reads like the " + nice(guess) + " Ω resistor, not " + nice(expected) + " Ω. Check which one is connected.";
+    $("wrong").classList.remove("hidden");
+    $("btn-remeasure").onclick = () => { $("wrong").classList.add("hidden"); resolve("again"); };
+    $("btn-keep").onclick = () => { $("wrong").classList.add("hidden"); resolve("keep"); };
+  });
+}
+
+async function waitOpen(text) {
+  await waitFor(s => s.open, (s, holds, fresh) => {
+    setReading(s.open ? "Open" : "≈ " + fmtR(s.r_est_ohm), s.open ? "Settling…" : text, s.open ? fresh : 0);
+  });
+}
+
+async function captureResistor(i, total) {
+  const r = session.set.values[i];
+  for (;;) {
+    stepView(i + 2, total, "Connect the " + nice(r) + " Ω resistor",
+      "Between socket " + session.letter + " on top and socket " + session.letter + " on the bottom. Keep it still until it is captured.", true);
+    renderStepChips();
+    const s = await waitFor(x => !x.open, (x, holds, fresh) => {
+      if (x.open) setReading("Open", "Waiting for the resistor…", 0);
+      else setReading(x.v_diff_mv.toFixed(1) + " mV", x.stable && holds ? "Stable" : "Settling…", fresh);
+    });
+    const est = estimateR(s.v_diff_mv);
+    if (est !== null) {
+      const guess = session.set.values.reduce((a, b) => Math.abs(b - est) < Math.abs(a - est) ? b : a);
+      if (guess !== r && Math.abs(est - r) / r > 0.15) {
+        setReading(s.v_diff_mv.toFixed(1) + " mV", "Check the resistor", 1);
+        if (await askWrong(r, guess) === "again") {
+          stepView(i + 2, total, "Remove the resistor", "Then connect the " + nice(r) + " Ω resistor again.", true);
+          await waitOpen("Remove the resistor");
+          continue;
+        }
+      }
+    }
+    session.points.push({ r_ohm: r, v_diff_mv: s.v_diff_mv });
+    session.raw.push([r, s.v_top_mv, s.v_bottom_mv, s.v_diff_mv, s.noise_sd_mv]);
+    feedback("captured");
+    renderStepChips();
+    setReading(s.v_diff_mv.toFixed(1) + " mV", "✓ Captured", 1);
+    $("instruction").textContent = "Captured. Remove the resistor.";
+    $("hint").textContent = "";
+    await waitOpen("Remove the resistor");
+    return;
+  }
+}
+
+async function startCalibration() {
+  const set = currentSet();
+  session = { set, path: info.default_path, letter: (info.sockets || {})[info.default_path] || "A", points: [], raw: [], aborted: false,
+              prev: info.active_model, recorded: false, runId: Math.floor(Date.now() / 1000) };
+  drawSockets(session.letter);
+  const total = set.values.length + 1;
+  show("s-wizard");
+  stepView(1, total, "Preparing the tester…", "", false);
+  setReading("–", "", 0);
+  $("step-chips").innerHTML = "";
+  try {
+    await api("POST", "/api/cal/begin", { path: session.path });
+    feedback("reset");
+    keepAliveTimer = setInterval(() => api("GET", "/api/cal/info").catch(() => {}), 30000);
+    const t0 = Date.now();
+    while (!(await api("GET", "/api/cal/info")).active) {
+      if (session.aborted) return;
+      if (Date.now() - t0 > 3000) $("hint").textContent = "Unplug any body cord or weapon from the tester.";
+      await sleep(POLL_MS);
+    }
+    stepView(1, total, "Remove everything from the tester", "No cords, no clips, no resistor.", false);
+    const open = await waitFor(s => s.open, (s, holds, fresh) => {
+      setReading(s.open ? "Open" : "≈ " + fmtR(s.r_est_ohm), s.open ? (s.stable ? "Stable" : "Settling…") : "Something is still connected", fresh);
+    });
+    session.open = { v_top_mv: open.v_top_mv, v_bottom_mv: open.v_bottom_mv, v_diff_mv: open.v_diff_mv };
+    feedback("captured");
+    for (let i = 0; i < set.values.length; i++) await captureResistor(i, total);
+    $("progress").style.width = "100%";
+    await showResult();
+  } catch (e) {
+    if (e.message === "aborted") return;
+    await endSession();
+    showDone("Calibration stopped: " + e.message);
+  }
+}
+
+let lastFit = null;
+async function showResult() {
+  const fit = await api("POST", "/api/cal/fit", { path: session.path, open: { v_top_mv: session.open.v_top_mv }, points: session.points });
+  lastFit = fit;
+  feedback(fit.verdict === "fail" ? "fail" : "pass");
+  const labels = { excellent: ["Excellent", "ok"], pass: ["Pass", "mid"], fail: ["Fail", "ko"] };
+  const [word, cls] = labels[fit.verdict];
+  $("verdict").textContent = word;
+  $("verdict").className = "verdict " + cls;
+  $("verdict-text").textContent = fit.verdict === "excellent" ? "Every resistor within " + fit.target_pct + " %."
+    : fit.verdict === "pass" ? "Every resistor within " + fit.limit_pct + " % (target " + fit.target_pct + " %)."
+    : "A resistor is more than " + fit.limit_pct + " % off. Check the resistors and their contacts, then repeat. The old calibration stays active.";
+  const errCls = e => e <= fit.target_pct ? "ok" : e <= fit.limit_pct ? "mid" : "ko";
+  $("result-rows").innerHTML = fit.points.map(p =>
+    "<tr><td>" + nice(p.r_ohm) + " Ω</td><td>" + (p.r_est_ohm > 0 ? fmtR(p.r_est_ohm) : "–") + '</td><td class="' + errCls(p.err_pct) + '">' + fmt(p.err_pct, 2) + " %</td></tr>").join("");
+  $("compare-rows").innerHTML = [["New calibration", fit.fit], ["Before this run", fit.active], ["Factory values", fit.factory]].map(([n, e]) =>
+    "<tr><td>" + n + '</td><td class="' + errCls(e.max_err_pct) + '">' + fmt(e.max_err_pct, 2) + " %</td><td>" + fmt(e.rms_mv, 2) + " mV</td></tr>").join("");
+  const m = fit.model;
+  $("params").textContent = "V_gpio " + m.v_gpio_mv + " mV · R1+R2 " + m.r1_r2_ohm + " Ω · correction " + m.correction_ohm2 + " Ω² · set “" + session.set.name + "”";
+  $("btn-save").classList.toggle("hidden", fit.verdict === "fail");
+  $("result-actions").classList.remove("hidden");
+  $("saved-note").classList.add("hidden");
+  $("btn-result-undo").classList.add("hidden");
+  $("btn-check").disabled = false;
+  session.saved = false;
+  show("s-result");
+}
+
+function runRecord() {
+  const m = lastFit.model, p = session.prev;
+  return {
+    id: session.runId, ts: session.runId, kind: "calibrate", src: "web", set: session.set.name, path: session.path,
+    mac: info.mac, hw: info.hw_rev, fw: info.fw,
+    open: [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv],
+    pts: session.raw,
+    fit: [m.v_gpio_mv, m.r1_r2_ohm, m.correction_ohm2],
+    prev: [p.v_gpio_mv, p.r1_r2_ohm, p.correction_ohm2],
+    max_err: [lastFit.fit.max_err_pct, lastFit.factory.max_err_pct, lastFit.active.max_err_pct],
+    verdict: lastFit.verdict, saved: !!session.saved
+  };
+}
+
+// Once per run, when the operator decides (save, repeat, finish)
+async function recordRun() {
+  if (!session || !lastFit || session.recorded) return;
+  session.recorded = true;
+  const rec = runRecord();
+  mergeRuns([rec]);
+  try { await api("POST", "/api/cal/run", rec); } catch (e) { /* kept in the browser anyway */ }
+}
+
+$("btn-save").onclick = async () => {
+  $("btn-save").disabled = true;
+  try {
+    await api("POST", "/api/cal/save", { run_id: session.runId });
+    session.saved = true;
+    $("saved-note").classList.remove("hidden");
+    $("result-actions").classList.add("hidden");
+    $("btn-result-undo").classList.remove("hidden");
+    await recordRun();
+  } catch (e) {
+    $("verdict-text").textContent = "Saving failed: " + e.message;
+  }
+  $("btn-save").disabled = false;
+};
+$("btn-result-undo").onclick = async () => {
+  try {
+    await api("POST", "/api/cal/undo", { path: session.path });
+    $("saved-note").textContent = "Undone. The tester uses its previous calibration again.";
+    $("btn-result-undo").classList.add("hidden");
+  } catch (e) { $("saved-note").textContent = "Undo failed: " + e.message; }
+};
+$("btn-repeat").onclick = async () => { await recordRun(); stopKeepAlive(); startNewRun(); };
+$("btn-finish").onclick = async () => { await recordRun(); await endSession(); showDone(session && session.saved ? "The new calibration is active." : "Nothing was saved; the previous calibration is still active."); };
+$("btn-cancel").onclick = async () => { if (session) session.aborted = true; await endSession(); showDone("Calibration cancelled. Nothing was saved."); };
+
+let checking = false;
+$("btn-check").onclick = async () => {
+  show("s-check");
+  $("check-hint").textContent = "Between socket " + session.letter + " on top and socket " + session.letter + " on the bottom. The tester reads it with " + (session.saved ? "the new" : "its current") + " calibration.";
+  checking = true;
+  while (checking) {
+    try {
+      const s = await api("GET", "/api/cal/sample");
+      $("check-value").textContent = s.open ? "Open" : fmtR(s.r_est_ohm);
+      $("check-state").textContent = s.open ? "" : s.stable ? "Stable" : "Settling…";
+    } catch (e) { /* banner shows */ }
+    await sleep(POLL_MS);
+  }
+};
+$("btn-check-back").onclick = () => { checking = false; show("s-result"); };
+
+function stopKeepAlive() { if (keepAliveTimer) clearInterval(keepAliveTimer); keepAliveTimer = null; }
+async function endSession() {
+  checking = false;
+  stopKeepAlive();
+  try { await api("POST", "/api/cal/end"); } catch (e) { /* tester ends it after 5 min anyway */ }
+}
+function showDone(text) { $("done-text").textContent = text; show("s-done"); }
+function startNewRun() { session = null; lastFit = null; startCalibration(); }
+
+$("btn-start").onclick = startCalibration;
+$("btn-again").onclick = async () => { await refreshInfo().catch(() => {}); renderSetPicker(); show("s-start"); };
+$("btn-undo").onclick = async () => {
+  try { await api("POST", "/api/cal/undo", { path: info.default_path }); await refreshInfo(); $("tester-status").textContent += " Previous calibration restored."; }
+  catch (e) { $("tester-status").textContent = "Undo failed: " + e.message; }
+};
+$("btn-history").onclick = () => {
+  const runs = getRuns().slice().reverse();
+  $("history-rows").innerHTML = runs.length ? runs.map(r =>
+    "<tr><td>" + new Date(r.ts * 1000).toLocaleDateString() + "</td><td>" + (r.mac || "").slice(-5) + "</td><td>" +
+    (r.max_err ? fmt(r.max_err[0], 2) + " %" : "–") + "</td><td>" + r.verdict + (r.saved ? ", saved" : "") + "</td></tr>").join("")
+    : '<tr><td colspan="4" class="muted">No runs yet.</td></tr>';
+  show("s-history");
+};
+$("btn-history-back").onclick = () => show("s-start");
+
+// Leaving the page ends the session on the tester
+window.addEventListener("pagehide", () => { if (session && !session.aborted) navigator.sendBeacon("/api/cal/end"); });
+
+(async function init() {
+  importSetFromHash();
+  let storageOk = true;
+  try { localStorage.setItem("tcal.probe", "1"); localStorage.removeItem("tcal.probe"); } catch (e) { storageOk = false; }
+  $("captive").classList.toggle("hidden", storageOk);
+  for (;;) {
+    try { await refreshInfo(); break; } catch (e) { await sleep(2000); }
+  }
+  renderSetPicker();
+  show("s-start");
+})();
+</script>
+</body>
+</html>

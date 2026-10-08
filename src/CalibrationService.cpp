@@ -5,6 +5,7 @@
 #include "CalibrationStore.h"
 #include "Hardware.h"
 #include "WiFiPowerManager.h"
+#include "calibrate_html.h"
 #include "cJSON.h"
 #include "esp_mac.h"
 #include "version.h"
@@ -152,6 +153,20 @@ void CalibrationService::queueModel(const EmpiricalModel& m) {
     queued_ = true;
     queuedModel_ = m;
     unlock();
+}
+
+void CalibrationService::setFeedback(CalFeedback f) {
+    lock();
+    feedback_ = f;
+    unlock();
+}
+
+CalFeedback CalibrationService::takeFeedback() {
+    lock();
+    CalFeedback f = feedback_;
+    feedback_ = CalFeedbackNone;
+    unlock();
+    return f;
 }
 
 void CalibrationService::setActive(bool on) {
@@ -509,9 +524,12 @@ static void handleInfo(AsyncWebServerRequest* request, const String& deviceName)
     cJSON_AddStringToObject(obj, "default_path", kDefaultCalibrationPath.name);
     cJSON_AddStringToObject(obj, "path", calibrationService.path().name);
     cJSON* paths = cJSON_AddArrayToObject(obj, "paths");
+    cJSON* sockets = cJSON_AddObjectToObject(obj, "sockets");  // path -> FIE socket letter to connect to
     cJSON* models = cJSON_AddArrayToObject(obj, "models");
     for (int i = 0; i < kNumCalibrationPaths; i++) {
+        const char letter[2] = {kCalibrationPaths[i].socket, '\0'};
         cJSON_AddItemToArray(paths, cJSON_CreateString(kCalibrationPaths[i].name));
+        cJSON_AddStringToObject(sockets, kCalibrationPaths[i].name, letter);
         addModelInfo(models, kCalibrationPaths[i]);
     }
     cJSON_AddItemToObject(obj, "active_model", modelToJson(calibrationService.activeModel()));
@@ -530,6 +548,35 @@ void registerCalibrationApi(AsyncWebServer& server, const String& deviceName) {
               [&deviceName](AsyncWebServerRequest* request) { handleInfo(request, deviceName); });
 
     server.on("/api/cal/sample", HTTP_GET, handleSample);
+
+    // The calibration wizard page (web/calibrate.html, gzipped at build time)
+    server.on("/calibrate", HTTP_GET, [](AsyncWebServerRequest* request) {
+        AsyncWebServerResponse* response =
+            request->beginResponse(200, "text/html", calibrate_html_gz, calibrate_html_gz_len);
+        response->addHeader("Content-Encoding", "gzip");
+        response->addHeader("Cache-Control", "no-cache");
+        request->send(response);
+    });
+
+    server.on("/cal", HTTP_GET, [](AsyncWebServerRequest* request) { request->redirect("/calibrate"); });
+
+    onPostJson(server, "/api/cal/feedback", [](AsyncWebServerRequest* request, cJSON* body) {
+        cJSON* event = cJSON_GetObjectItemCaseSensitive(body, "event");
+        const char* name = cJSON_IsString(event) ? event->valuestring : "";
+        CalFeedback f = strcmp(name, "reset") == 0      ? CalFeedbackReset
+                        : strcmp(name, "captured") == 0 ? CalFeedbackCaptured
+                        : strcmp(name, "pass") == 0     ? CalFeedbackPass
+                        : strcmp(name, "fail") == 0     ? CalFeedbackFail
+                                                        : CalFeedbackNone;
+        if (f == CalFeedbackNone) {
+            sendError(request, 400, "event: reset, captured, pass or fail");
+            return;
+        }
+        calibrationService.setFeedback(f);
+        cJSON* obj = cJSON_CreateObject();
+        cJSON_AddBoolToObject(obj, "ok", true);
+        sendJson(request, 200, obj);
+    });
 
     onPostJson(server, "/api/cal/begin", [](AsyncWebServerRequest* request, cJSON* body) {
         const CalibrationPath* path = pathFromRequest(request, body);

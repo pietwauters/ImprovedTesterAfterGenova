@@ -465,7 +465,8 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
 
     printf("Now collect calibration data points with known resistors.\n");
     printf("Suggest: 1, 2, 3, 5, 8, 10, 12 ohms for good coverage.\n\n");
-    printf("Known resistor must be connected on path %s (top socket to bottom socket)!\n\n", path.name);
+    printf("Known resistor must be connected between socket %c on top and socket %c on the bottom!\n\n", path.socket,
+           path.socket);
 
     while (num_points < CalMaxPoints) {
         printf("[Point %d] Enter known resistance value (0 to finish, need minimum %d): ", num_points + 1,

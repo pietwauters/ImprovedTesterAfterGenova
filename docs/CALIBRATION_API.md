@@ -1,9 +1,17 @@
-# Calibration web API
+# Calibration over Wi-Fi
 
-The tester can be calibrated over Wi-Fi, without a serial cable. This is the
-HTTP API the calibration wizard page uses (phase 1: API only; the wizard page
-follows). Everything is reachable on the `Tester` access point at
-`http://192.168.4.1`.
+The tester can be calibrated over Wi-Fi, without a serial cable. Connect a
+phone, tablet or laptop to the `Tester` access point and open
+**`http://192.168.4.1/calibrate`** (or `/cal`). The page guides the operator
+step by step; resistor sets and the calibration history are kept in that
+browser, not on the tester.
+
+The page source is `web/calibrate.html`. `extra_script.py` gzips it into
+`src/calibrate_html.h` on every build (only rewritten when the page changed),
+so edit the HTML, never the header.
+
+Below is the HTTP API the page uses; `tools/cal_wizard.py` and curl use the
+same API.
 
 ## How it fits together
 
@@ -21,7 +29,10 @@ follows). Everything is reachable on the `Tester` access point at
   touches the measurement hardware.
 - **Paths** (`CalibrationPaths.h`) — `Cl-Cr` (default; the model the tester
   uses for all thresholds) and `Bl-Br`. Pins come from `Hardware.h`, so all
-  hardware revisions share the table.
+  hardware revisions share the table. Path names use the code's terminal
+  names, which differ from the socket letters on the tester (code C = socket
+  A, code A = socket B, code B = socket C): `Cl-Cr` is socket **A** top to
+  bottom, `Bl-Br` socket **C**. `/api/cal/info` returns this as `sockets`.
 
 While a session is open, mode detection is paused, the LED matrix shows a blue
 **C**, Wi-Fi stays on and the tester does not sleep. A session ends with
@@ -44,6 +55,7 @@ All responses are JSON. Units are in the names (`_mv`, `_ohm`, `_pct`).
 | POST | `/api/cal/undo` | `{"path":"Cl-Cr"}` (optional) | Swap the current and previous model of a path |
 | POST | `/api/cal/run` | run record JSON, max 768 bytes compacted, must have `"id"` | Store a run record in the tester's ring |
 | GET | `/api/cal/runs` | | Stored run records, oldest first |
+| POST | `/api/cal/feedback` | `{"event":"reset"\|"captured"\|"pass"\|"fail"}` | LED matrix: blue C, green flash on a capture, green or red C for the verdict |
 | POST | `/api/cal/end` | | Leave the `Calibrating` state |
 
 `stable` means the last 12 readings (about 1 s) of V_diff lie within
@@ -96,7 +108,7 @@ curl -s $T/api/cal/info                 # repeat until "active":true
 # nothing connected: note v_top_mv as the open-circuit reference
 curl -s $T/api/cal/sample               # repeat until "stable":true and "open":true
 
-# for each resistor between top C and bottom C: note v_diff_mv once stable
+# for each resistor between socket A on top and socket A on the bottom: note v_diff_mv once stable
 curl -s $T/api/cal/sample
 
 # put the values in points.json (format above), then:

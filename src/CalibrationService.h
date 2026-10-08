@@ -11,6 +11,9 @@
 // Wi-Fi power manager lock held while a calibration session is open
 constexpr const char* CalibrationWiFiLock = "calibration";
 
+// What the wizard tells the operator; the tester mirrors it on the LED matrix
+enum CalFeedback { CalFeedbackNone, CalFeedbackReset, CalFeedbackCaptured, CalFeedbackPass, CalFeedbackFail };
+
 // Live reading of the calibration path, averaged over the last readings
 struct CalSample {
     bool valid;         // at least one reading since the path was selected
@@ -55,6 +58,7 @@ class CalibrationService {
     bool lastFit(const CalibrationPath*& path, EmpiricalModel& m, CalVerdict& verdict);
     void clearLastFit();
     void queueModel(const EmpiricalModel& m);  // tester task applies it
+    void setFeedback(CalFeedback f);
 
     // --- tester task side ---
     void setActive(bool on);
@@ -62,6 +66,7 @@ class CalibrationService {
     // Dropped when the path changed while it was being measured
     void pushReading(const CalibrationPath& path, const EmpiricalResistorCalibrator::EmpiricalReading& r);
     bool takeQueuedModel(EmpiricalModel& m);
+    CalFeedback takeFeedback();
     bool idleTimedOut();
 
    private:
@@ -84,6 +89,8 @@ class CalibrationService {
     const CalibrationPath* fitPath_ = nullptr;
     EmpiricalModel fitModel_;
     CalVerdict fitVerdict_ = CalFail;
+
+    CalFeedback feedback_ = CalFeedbackNone;
 
     bool queued_ = false;
     EmpiricalModel queuedModel_;

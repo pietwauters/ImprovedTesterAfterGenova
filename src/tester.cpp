@@ -292,15 +292,50 @@ void Tester::enterCalibratingState() {
     calibrationService.setActiveModel(mycalibrator.model());
     calibrationService.setActive(true);
     printf("[Cal] session started on path %s\n", calibrationService.path().name);
-    ledPanel->ClearAll();
-    ledPanel->Draw_C(ledPanel->m_Blue);
-    ledPanel->myShow();
+    calLedColor_ = ledPanel->m_Blue;
+    calFlashUntil_ = 0;
+    calibrationService.takeFeedback();  // drop feedback from an earlier session
+    showCalibrationLed(calLedColor_);
     Display.setMode("Calibrating");
     Display.showMode();
 }
 
+void Tester::showCalibrationLed(uint32_t color) {
+    ledPanel->ClearAll();
+    ledPanel->Draw_C(color);
+    ledPanel->myShow();
+}
+
 // Measure the selected path continuously; the web API reads the averaged sample
 void Tester::handleCalibratingState() {
+    switch (calibrationService.takeFeedback()) {
+        case CalFeedbackReset:
+            calLedColor_ = ledPanel->m_Blue;
+            calFlashUntil_ = 0;
+            showCalibrationLed(calLedColor_);
+            break;
+        case CalFeedbackCaptured:
+            calFlashUntil_ = millis() + 700;
+            showCalibrationLed(ledPanel->m_Green);
+            break;
+        case CalFeedbackPass:
+            calLedColor_ = ledPanel->m_Green;
+            calFlashUntil_ = 0;
+            showCalibrationLed(calLedColor_);
+            break;
+        case CalFeedbackFail:
+            calLedColor_ = ledPanel->m_Red;
+            calFlashUntil_ = 0;
+            showCalibrationLed(calLedColor_);
+            break;
+        default:
+            break;
+    }
+    if (calFlashUntil_ != 0 && (long)(millis() - calFlashUntil_) >= 0) {
+        calFlashUntil_ = 0;
+        showCalibrationLed(calLedColor_);
+    }
+
     if (!calibrationService.isRequested()) {
         printf("[Cal] session ended: /api/cal/end\n");
         leaveCalibratingState();
