@@ -38,6 +38,36 @@ def embed_web_pages():
 
 embed_web_pages()
 
+
+def write_version_header():
+    """APP_VERSION from `git describe`, written to the build dir's version.h on every build.
+
+    A build from a modified working tree also gets the build time, so every test
+    binary is identifiable in calibration run records. Rewritten only on change.
+    """
+    project_dir = env["PROJECT_DIR"]
+    try:
+        version = subprocess.check_output(["git", "describe", "--tags", "--always", "--dirty"],
+                                          cwd=project_dir, stderr=subprocess.DEVNULL).decode().strip()
+    except (OSError, subprocess.CalledProcessError):
+        version = "unknown"
+    if version.endswith("-dirty"):
+        version += "+" + datetime.now().strftime("%Y%m%d-%H%M")
+    path = os.path.join(env.subst("$BUILD_DIR"), "version.h")
+    text = '#pragma once\n#define APP_VERSION "%s"\n' % version
+    old = None
+    if os.path.exists(path):
+        with open(path) as f:
+            old = f.read()
+    if text != old:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+    print("Firmware version: " + version)
+
+
+write_version_header()
+
 def after_build(source, target, env):
     print("📦 Post-build script running")
 
