@@ -559,13 +559,20 @@ static void handleInfo(AsyncWebServerRequest* request, const String& deviceName)
     cJSON_AddStringToObject(obj, "default_path", kDefaultCalibrationPath.name);
     cJSON_AddStringToObject(obj, "path", calibrationService.path().name);
     cJSON* paths = cJSON_AddArrayToObject(obj, "paths");
-    cJSON* sockets = cJSON_AddObjectToObject(obj, "sockets");  // path -> FIE socket letter to connect to
+    cJSON* sockets = cJSON_AddObjectToObject(obj, "sockets");  // straight paths: socket letter, top and bottom
+    cJSON* ends = cJSON_AddObjectToObject(obj, "ends");        // every path: its two physical end points
     cJSON* models = cJSON_AddArrayToObject(obj, "models");
     for (int i = 0; i < kNumCalibrationPaths; i++) {
-        const char letter[2] = {kCalibrationPaths[i].socket, '\0'};
-        cJSON_AddItemToArray(paths, cJSON_CreateString(kCalibrationPaths[i].name));
-        cJSON_AddStringToObject(sockets, kCalibrationPaths[i].name, letter);
-        addModelInfo(models, kCalibrationPaths[i]);
+        const CalibrationPath& p = kCalibrationPaths[i];
+        cJSON_AddItemToArray(paths, cJSON_CreateString(p.name));
+        if (p.from[0] == p.to[0]) {
+            const char letter[2] = {p.from[0], '\0'};
+            cJSON_AddStringToObject(sockets, p.name, letter);
+        }
+        cJSON* pair = cJSON_AddArrayToObject(ends, p.name);
+        cJSON_AddItemToArray(pair, cJSON_CreateString(p.from));
+        cJSON_AddItemToArray(pair, cJSON_CreateString(p.to));
+        addModelInfo(models, p);
     }
     cJSON_AddItemToObject(obj, "active_model", modelToJson(calibrationService.activeModel()));
     cJSON_AddItemToObject(obj, "factory_model", modelToJson(EmpiricalResistorCalibrator::factoryModel()));

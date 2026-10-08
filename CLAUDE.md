@@ -77,9 +77,11 @@ See `docs/CALIBRATION_API.md`. The tester serves a step-by-step wizard at
 generated `src/calibrate_html.h` on every build — edit the HTML, never the
 header). Resistor sets and run history live in the operator's browser.
 
-- **`CalibrationPaths.h`** — measurable paths: `Cl-Cr` (default, = socket A,
-  the model used for all thresholds) and `Bl-Br` (= socket C, what the old
-  serial calibration measured).
+- **`CalibrationPaths.h`** — all 15 connections with drive configuration,
+  ADC channels and physical end points (`from`/`to`, e.g. "B bottom", "A top").
+  `Cl-Cr` (socket A top to bottom) is the default path: its model is used for
+  all thresholds. `tools/cal_validate.py` measures how well that model reads
+  the other connections.
 - **`CalibrationStore`** — NVS `cal_store`: model per path + previous (undo),
   ring of 6 run records. Model type `empirical-bidir` is used;
   `empirical-v1` (forward-only readings) is kept but ignored as outdated.

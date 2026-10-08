@@ -111,7 +111,10 @@ def main():
     runs = load(path)
     if not runs:
         raise SystemExit(f"No runs in {path}")
+    validations = [r for r in runs if r.get("kind") == "validate"]
     for run in runs:
+        if run.get("kind") == "validate":
+            continue
         pts = run["pts"]
         R = [p[0] for p in pts]
         name = f" '{run['name']}'" if run.get("name") else ""
@@ -130,6 +133,25 @@ def main():
             if run.get("contact"):
                 print("  contact check (captures, spread %)  " + "  ".join(f"{c[0]}/{c[1]:.2f}" for c in run["contact"]))
             print("  forward - reversed V_diff  " + " ".join(f"{(p[1] - p[2] - p[6]):+6.2f}" for p in pts) + " mV")
+    if validations:
+        report_validations(validations)
+
+
+def report_validations(runs):
+    """Runs of tools/cal_validate.py: the tester's (A-A) model read on other connections."""
+    print("\nOther connections, read with the tester's model (signed error per resistor):")
+    for run in runs:
+        R = [p[0] for p in run["pts"]]
+        V = [p[3] / 1000 for p in run["pts"]]  # bidirectional average
+        a = run["active"]
+        e = errors((a[0] / 1000, a[1], a[2]), R, V)
+        o = run["own"]
+        own = errors((o[0] / 1000, o[1], o[2]), R, V)
+        ends = " - ".join(run.get("ends", ["?", "?"]))
+        name = f" '{run['name']}'" if run.get("name") else ""
+        print(f"  {run.get('mac', '')[-5:]}{name} {run['path']:6s} {ends:20s} worst {max(e, key=abs):+6.2f} %  "
+              f"rms {math.sqrt(sum(x * x for x in e) / len(e)):4.2f} %  own model worst {max(map(abs, own)):4.2f} %  "
+              f"errors " + " ".join(f"{x:+6.2f}" for x in e) + f"   ({run.get('use', '')})")
 
 
 if __name__ == "__main__":

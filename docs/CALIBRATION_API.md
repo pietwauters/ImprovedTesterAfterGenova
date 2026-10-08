@@ -27,12 +27,14 @@ same API.
   *request*; the tester task enters its `Calibrating` state, measures the
   selected path continuously and applies saved models. Only the tester task
   touches the measurement hardware.
-- **Paths** (`CalibrationPaths.h`) — `Cl-Cr` (default; the model the tester
-  uses for all thresholds) and `Bl-Br`. Pins come from `Hardware.h`, so all
-  hardware revisions share the table. Path names use the code's terminal
-  names, which differ from the socket letters on the tester (code C = socket
-  A, code A = socket B, code B = socket C): `Cl-Cr` is socket **A** top to
-  bottom, `Bl-Br` socket **C**. `/api/cal/info` returns this as `sockets`.
+- **Paths** (`CalibrationPaths.h`) — all 15 connections between the six
+  terminals, each with its drive configuration, ADC channels and physical
+  end points. `Cl-Cr` (socket A top to bottom) is the default: the model the
+  tester uses for all thresholds. Pins come from `Hardware.h`, so all hardware
+  revisions share the table. Path names use the code's terminal names, which
+  differ from the socket letters on the tester (code C = socket A, code A =
+  socket B, code B = socket C). `/api/cal/info` returns the physical end points
+  as `ends` (and `sockets` for the straight paths).
 
 While a session is open, mode detection is paused, the LED matrix shows a blue
 **C**, Wi-Fi stays on and the tester does not sleep. A session ends with
@@ -111,6 +113,16 @@ python3 tools/cal_wizard.py -r 1,2.2,4.7,10  # your resistors, remembered on thi
 python3 tools/cal_wizard.py                  # next time: the last set again
 python3 tools/cal_wizard.py --list-sets      # named sets: --set-name NAME
 ```
+
+## Accuracy on other connections
+
+`tools/cal_validate.py` measures the resistor set on other connections (any
+path, see `--list`) without saving, and reports per connection how the
+tester's model reads each resistor (signed error) and how good a model of the
+connection's own would be. Default: A-A as reference, then B-B, C-C, the
+bottom pairs (epee loop, foil loop, bottom lame) and the cross pairs used by
+the weapon tests (tip wire, probe); `--priority 3` adds the rest. Results go to
+`cal_runs.jsonl` (kind `validate`); `tools/cal_analyze.py` lists them.
 
 ## Calibrating with curl
 
