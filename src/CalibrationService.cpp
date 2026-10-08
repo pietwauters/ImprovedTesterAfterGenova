@@ -104,6 +104,17 @@ CalSample CalibrationService::sample() {
         s.v_top_mv /= count_;
         s.v_bottom_mv /= count_;
         s.v_diff_mv /= count_;
+        s.has_reversed = hasReversed_;
+        if (hasReversed_) {
+            for (int i = 0; i < count_; i++) {
+                s.v_top_rev_mv += topRev_[i];
+                s.v_bottom_rev_mv += bottomRev_[i];
+                s.v_diff_rev_mv += diffRev_[i];
+            }
+            s.v_top_rev_mv /= count_;
+            s.v_bottom_rev_mv /= count_;
+            s.v_diff_rev_mv /= count_;
+        }
         s.range_mv = hi - lo;
         float limit = fmaxf(StableAbsMv, fabsf(s.v_diff_mv) * StableRelPercent / 100.0f);
         s.stable = count_ == WindowSize && s.range_mv <= limit;
@@ -196,6 +207,10 @@ void CalibrationService::pushReading(const CalibrationPath& path,
     top_[next_] = r.v_top * 1000.0f;
     bottom_[next_] = r.v_bottom * 1000.0f;
     diff_[next_] = r.v_diff * 1000.0f;
+    topRev_[next_] = r.v_top_rev * 1000.0f;
+    bottomRev_[next_] = r.v_bottom_rev * 1000.0f;
+    diffRev_[next_] = r.v_diff_rev * 1000.0f;
+    hasReversed_ = r.has_reversed;
     next_ = (next_ + 1) % WindowSize;
     if (count_ < WindowSize) {
         count_++;
@@ -502,6 +517,11 @@ static void handleSample(AsyncWebServerRequest* request) {
         cJSON_AddBoolToObject(obj, "stable", s.stable);
         cJSON_AddBoolToObject(obj, "open", s.open);
         addRounded(obj, "r_est_ohm", s.r_est, 4);
+        if (s.has_reversed) {
+            addRounded(obj, "v_top_rev_mv", s.v_top_rev_mv, 2);
+            addRounded(obj, "v_bottom_rev_mv", s.v_bottom_rev_mv, 2);
+            addRounded(obj, "v_diff_rev_mv", s.v_diff_rev_mv, 2);
+        }
     }
     sendJson(request, 200, obj);
 }

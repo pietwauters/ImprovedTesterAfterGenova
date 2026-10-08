@@ -28,6 +28,12 @@ struct CalSample {
     bool stable;        // window full and range within the stability limit
     bool open;          // nothing (or more than OpenOhm) connected
     float r_est;        // resistance with the active model, -1 = none
+    // Second half of each reading with the drive reversed (window means; on the same
+    // channels, so v_bottom_rev is the high one and v_diff_rev = v_bottom_rev - v_top_rev)
+    bool has_reversed;
+    float v_top_rev_mv;
+    float v_bottom_rev_mv;
+    float v_diff_rev_mv;
 };
 
 // Shared state between the web API (async_tcp task) and the tester task, which
@@ -80,6 +86,8 @@ class CalibrationService {
 
     // ring of readings
     float top_[WindowSize], bottom_[WindowSize], diff_[WindowSize];
+    float topRev_[WindowSize], bottomRev_[WindowSize], diffRev_[WindowSize];
+    bool hasReversed_ = false;
     int count_ = 0, next_ = 0;
     uint32_t seq_ = 0;
     float noiseSd_ = 0.0f;

@@ -27,7 +27,7 @@ struct StoredModel {
 class CalibrationStore {
    public:
     static constexpr int MaxRuns = 6;
-    static constexpr size_t MaxRunBytes = 768;
+    static constexpr size_t MaxRunBytes = 1024;
 
     // Model stored for exactly this path
     bool load(const CalibrationPath& path, StoredModel& out) const;

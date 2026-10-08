@@ -211,12 +211,13 @@ bool CalibrationStore::getRun(int i, String& out) const {
     if (i >= 0 && i < count) {
         char key[16];
         runKey(key, sizeof(key), (next - count + i + MaxRuns) % MaxRuns);
-        char buffer[MaxRunBytes + 1];
-        size_t size = sizeof(buffer);
-        if (nvs_get_str(handle, key, buffer, &size) == ESP_OK) {
+        size_t size = MaxRunBytes + 1;
+        char* buffer = (char*)malloc(size);  // not on the stack: this runs in the web server task
+        if (buffer != nullptr && nvs_get_str(handle, key, buffer, &size) == ESP_OK) {
             out = buffer;
             ok = true;
         }
+        free(buffer);
     }
     nvs_close(handle);
     return ok;

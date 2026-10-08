@@ -68,10 +68,19 @@ class EmpiricalResistorCalibrator {
         float v_diff_sd_mv;  // standard deviation of the per-sample V_diff (mV)
         int samples_used;    // samples left after trimming outliers
         float resistance;
+        // Second half with the drive reversed (bidirectional only): same channels, so here
+        // the bottom one is high and v_diff_rev = v_bottom_rev - v_top_rev
+        bool has_reversed;
+        float v_top_rev;
+        float v_bottom_rev;
+        float v_diff_rev;
     };
 
-    // Drive the terminals of a calibration path and measure it
-    EmpiricalReading measure(const CalibrationPath& path, int samples = 100, bool verbose = true);
+    // Drive the terminals of a calibration path and measure it. Bidirectional: the first half of
+    // the samples forward, the second half with the current reversed (both reported separately;
+    // v_diff and resistance are always the forward reading, which is what the tests measure).
+    EmpiricalReading measure(const CalibrationPath& path, int samples = 100, bool verbose = true,
+                             bool bidirectional = false);
 
     // Model access
     EmpiricalModel model() const { return {v_gpio, r1_r2, correction}; }
@@ -115,6 +124,14 @@ class EmpiricalResistorCalibrator {
 
     // ADC calibration
     esp_adc_cal_characteristics_t adc_chars;
+
+    struct ChannelMeans {
+        float v_top;       // V, trimmed mean
+        float v_bottom;    // V, trimmed mean
+        float diff_sd_mv;  // spread of the per-sample top - bottom
+        int used;          // samples after trimming
+    };
+    ChannelMeans sampleChannels(adc1_channel_t top, adc1_channel_t bottom, int samples);
 
     // Helper functions
     float calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction) const;

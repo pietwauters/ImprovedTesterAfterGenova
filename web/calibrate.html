@@ -481,7 +481,10 @@ async function captureResistor(i, total) {
       }
     }
     session.points.push({ r_ohm: r, v_diff_mv: s.v_diff_mv });
-    session.raw.push([r, s.v_top_mv, s.v_bottom_mv, s.v_diff_mv, s.noise_sd_mv]);
+    // [r, v_top, v_bottom, v_diff, noise sd, reversed v_top, reversed v_diff] (mV)
+    session.raw.push(s.v_diff_rev_mv !== undefined
+      ? [r, s.v_top_mv, s.v_bottom_mv, s.v_diff_mv, s.noise_sd_mv, s.v_top_rev_mv, s.v_diff_rev_mv]
+      : [r, s.v_top_mv, s.v_bottom_mv, s.v_diff_mv, s.noise_sd_mv]);
     feedback("captured");
     renderStepChips();
     setReading(s.v_diff_mv.toFixed(1) + " mV", "✓ Captured", 1);
@@ -516,7 +519,8 @@ async function startCalibration() {
     const open = await waitFor(s => s.open, (s, holds, fresh) => {
       setReading(s.open ? "Open" : "≈ " + fmtR(s.r_est_ohm), s.open ? (s.stable ? "Stable" : "Settling…") : "Something is still connected", fresh);
     });
-    session.open = { v_top_mv: open.v_top_mv, v_bottom_mv: open.v_bottom_mv, v_diff_mv: open.v_diff_mv };
+    session.open = { v_top_mv: open.v_top_mv, v_bottom_mv: open.v_bottom_mv, v_diff_mv: open.v_diff_mv,
+                     v_top_rev_mv: open.v_top_rev_mv, v_diff_rev_mv: open.v_diff_rev_mv };
     feedback("captured");
     for (let i = 0; i < set.values.length; i++) await captureResistor(i, total);
     $("progress").style.width = "100%";
@@ -561,7 +565,9 @@ function runRecord() {
   return {
     id: session.runId, ts: session.runId, kind: "calibrate", src: "web", set: session.set.name, path: session.path,
     mac: info.mac, hw: info.hw_rev, fw: info.fw,
-    open: [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv],
+    open: session.open.v_diff_rev_mv !== undefined
+      ? [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv, session.open.v_top_rev_mv, session.open.v_diff_rev_mv]
+      : [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv],
     pts: session.raw,
     fit: [m.v_gpio_mv, m.r1_r2_ohm, m.correction_ohm2],
     prev: [p.v_gpio_mv, p.r1_r2_ohm, p.correction_ohm2],

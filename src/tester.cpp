@@ -348,7 +348,7 @@ void Tester::handleCalibratingState() {
     }
     const CalibrationPath& path = calibrationService.path();
     EmpiricalResistorCalibrator::EmpiricalReading reading =
-        mycalibrator.measure(path, CalibrationService::SamplesPerReading, false);
+        mycalibrator.measure(path, CalibrationService::SamplesPerReading, false, true);
     calibrationService.pushReading(path, reading);
 }
 

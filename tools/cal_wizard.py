@@ -232,7 +232,10 @@ def main():
                     s = wait_for(tester, lambda s: not s.get("open"), f"{r:g} Ohm")
             print(f"  Captured: V_diff {s['v_diff_mv']:.2f} mV")
             points.append({"r_ohm": r, "v_diff_mv": s["v_diff_mv"]})
-            raw.append([r, s["v_top_mv"], s["v_bottom_mv"], s["v_diff_mv"], s["noise_sd_mv"]])
+            point = [r, s["v_top_mv"], s["v_bottom_mv"], s["v_diff_mv"], s["noise_sd_mv"]]
+            if "v_diff_rev_mv" in s:
+                point += [s["v_top_rev_mv"], s["v_diff_rev_mv"]]
+            raw.append(point)
             wait_until_open(tester)
             print()
 
@@ -259,8 +262,10 @@ def main():
         record = {
             "id": run_id, "ts": run_id, "kind": "calibrate", "set": set_name,
             "path": args.path, "mac": info["mac"], "hw": info["hw_rev"], "fw": info["fw"],
-            "open": [open_s["v_top_mv"], open_s["v_bottom_mv"], open_s["v_diff_mv"]],
-            "pts": raw,  # [r_ohm, v_top_mv, v_bottom_mv, v_diff_mv, noise_sd_mv]
+            "open": [open_s["v_top_mv"], open_s["v_bottom_mv"], open_s["v_diff_mv"]]
+                    + ([open_s["v_top_rev_mv"], open_s["v_diff_rev_mv"]] if "v_diff_rev_mv" in open_s else []),
+            # [r_ohm, v_top_mv, v_bottom_mv, v_diff_mv, noise_sd_mv(, reversed v_top_mv, reversed v_diff_mv)]
+            "pts": raw,
             "fit": [m["v_gpio_mv"], m["r1_r2_ohm"], m["correction_ohm2"]],
             "prev": [prev["v_gpio_mv"], prev["r1_r2_ohm"], prev["correction_ohm2"]],
             "max_err": [fit["fit"]["max_err_pct"], fit["factory"]["max_err_pct"], fit["active"]["max_err_pct"]],

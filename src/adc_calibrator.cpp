@@ -51,14 +51,13 @@ const char* calVerdictName(CalVerdict verdict) {
     }
 }
 
-EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::measure(const CalibrationPath& path,
-                                                                                   int samples, bool verbose) {
-    EmpiricalReading result;
+// Trimmed means of both channels over `samples` samples, plus the spread of the per-sample difference
+EmpiricalResistorCalibrator::ChannelMeans EmpiricalResistorCalibrator::sampleChannels(adc1_channel_t top,
+                                                                                      adc1_channel_t bottom,
+                                                                                      int samples) {
+    ChannelMeans result;
     // Use the same successful approach as the working differential calibrator
     const float trim_percent = 0.2f;  // Remove 20% outliers like the working differential calibrator
-
-    MeasurementHardware::Set_IODirectionAndValue(path.ioDirection, path.ioValues);
-    vTaskDelay(pdMS_TO_TICKS(2));  // let the terminals settle after switching
 
     // Allocate arrays for calibrated voltage samples (in millivolts)
     uint32_t* mv_top_samples = new uint32_t[samples];
@@ -69,8 +68,8 @@ EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::measu
     for (int i = 0; i < samples; ++i) {
         esp_task_wdt_reset();  // Reset WDT every iteration
 
-        uint32_t raw_top = adc1_get_raw(path.top);
-        uint32_t raw_bottom = adc1_get_raw(path.bottom);
+        uint32_t raw_top = adc1_get_raw(top);
+        uint32_t raw_bottom = adc1_get_raw(bottom);
 
         // Convert each raw sample to millivolts using eFuse calibration
         mv_top_samples[i] = esp_adc_cal_raw_to_voltage(raw_top, &adc_chars);
@@ -83,7 +82,7 @@ EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::measu
     }
     double mean_diff = sum_diff / samples;
     double var_diff = sum_diff_sq / samples - mean_diff * mean_diff;
-    result.v_diff_sd_mv = var_diff > 0 ? (float)sqrt(var_diff) : 0.0f;
+    result.diff_sd_mv = var_diff > 0 ? (float)sqrt(var_diff) : 0.0f;
 
     // Sort arrays to identify outliers (sorting millivolt values now)
     for (int i = 0; i < samples - 1; i++) {
@@ -121,19 +120,59 @@ EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::measu
     // Convert millivolts to volts (keep the fraction of a mV the averaging gives)
     result.v_top = (float)sum_mv_top / valid_samples / 1000.0f;
     result.v_bottom = (float)sum_mv_bottom / valid_samples / 1000.0f;
-    result.v_diff = result.v_top - result.v_bottom;
-    result.samples_used = valid_samples;
+    result.used = valid_samples;
+    return result;
+}
+
+// The drive with the other of the two output pins high; 0 if the path does not drive exactly two pins
+static uint8_t reversedValues(const CalibrationPath& path) {
+    uint8_t outputs = (uint8_t)(~path.ioDirection) & 0x7F;  // 7 driver pins, a 0 bit is an output
+    if (__builtin_popcount(outputs) != 2 || __builtin_popcount(outputs & path.ioValues) != 1) {
+        return 0;
+    }
+    return outputs & (uint8_t)~path.ioValues;
+}
+
+EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::measure(const CalibrationPath& path,
+                                                                                   int samples, bool verbose,
+                                                                                   bool bidirectional) {
+    EmpiricalReading result = {};
+    uint8_t reversed = bidirectional ? reversedValues(path) : 0;
+    int forwardSamples = reversed != 0 ? samples / 2 : samples;
+
+    MeasurementHardware::Set_IODirectionAndValue(path.ioDirection, path.ioValues);
+    vTaskDelay(pdMS_TO_TICKS(2));  // let the terminals settle after switching
+    ChannelMeans fwd = sampleChannels(path.top, path.bottom, forwardSamples);
+    result.v_top = fwd.v_top;
+    result.v_bottom = fwd.v_bottom;
+    result.v_diff = fwd.v_top - fwd.v_bottom;
+    result.v_diff_sd_mv = fwd.diff_sd_mv;
+    result.samples_used = fwd.used;
+
+    if (reversed != 0) {
+        // Same channels, current the other way: the bottom terminal is now the high one
+        MeasurementHardware::Set_IODirectionAndValue(path.ioDirection, reversed);
+        vTaskDelay(pdMS_TO_TICKS(2));
+        ChannelMeans rev = sampleChannels(path.top, path.bottom, samples - forwardSamples);
+        result.has_reversed = true;
+        result.v_top_rev = rev.v_top;
+        result.v_bottom_rev = rev.v_bottom;
+        result.v_diff_rev = rev.v_bottom - rev.v_top;
+        MeasurementHardware::Set_IODirectionAndValue(path.ioDirection, path.ioValues);
+    }
 
     if (verbose) {
         printf("Empirical differential result (trimmed mean): v_top=%.4f V, v_bottom=%.4f V, v_diff=%.4f V\n",
                result.v_top, result.v_bottom, result.v_diff);
-        printf("  Used %d samples (removed %d outliers from each end), V_diff spread %.2f mV\n", valid_samples,
-               trim_count, result.v_diff_sd_mv);
+        printf("  Used %d samples, V_diff spread %.2f mV\n", result.samples_used, result.v_diff_sd_mv);
+        if (result.has_reversed) {
+            printf("  Reversed: v_top=%.4f V, v_bottom=%.4f V, v_diff=%.4f V\n", result.v_top_rev,
+                   result.v_bottom_rev, result.v_diff_rev);
+        }
     }
 
     // For empirical model: V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
-    // The V_diff in this model is the voltage ACROSS the unknown resistor
-    // Calculate resistance using empirical model with v_diff as the measured voltage
+    // The model is calibrated on the forward reading, the one the tester uses in its tests
     result.resistance = get_resistance_empirical(result.v_diff);
 
     return result;
