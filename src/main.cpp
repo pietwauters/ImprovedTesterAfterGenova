@@ -14,6 +14,7 @@
 #include "PreferencesWrapper.h"
 #include "SettingsManager.h"
 #include "WS2812BLedMatrix.h"
+#include "CalibrationService.h"
 #include "WebTerminal.h"
 #include "WiFiPowerManager.h"
 #include "driver/adc.h"
@@ -420,7 +421,7 @@ void LoadSettings() {
 // at minimal TX power.
 #ifndef WIFI_START_DELAY_MS
 #define WIFI_START_DELAY_MS \
-    20000  // ms after boot before the AP comes up (bump if it still browns out during calibration)
+    5000  // ms after setup() before the AP comes up (bump if it still browns out during calibration)
 #endif
 #ifndef WIFI_TX_POWER
 #define WIFI_TX_POWER WIFI_POWER_MINUS_1dBm  // absolute minimum; raise (e.g. WIFI_POWER_5dBm) if the AP is unreachable
@@ -453,6 +454,7 @@ void SetupNetworkStuff() {
 
     // Register the single command handler to web terminal
     commandHandler.registerTo(&terminal);
+    registerCalibrationApi(server, deviceName);
 
     server.begin();
     terminal.printf("HTTP server started\n");

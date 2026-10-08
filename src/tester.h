@@ -17,7 +17,16 @@
 #include "resitancemeasurement.h"
 
 // State enum
-typedef enum { Waiting, EpeeTesting, FoilTesting, LameTesting, WireTesting_1, WireTesting_2, ReelTesting } State_t;
+typedef enum {
+    Waiting,
+    EpeeTesting,
+    FoilTesting,
+    LameTesting,
+    WireTesting_1,
+    WireTesting_2,
+    ReelTesting,
+    Calibrating  // web calibration session (CalibrationService), mode detection paused
+} State_t;
 typedef enum {
     SHAPE_F,
     SHAPE_E,
@@ -134,6 +143,10 @@ class Tester {
     void handleWaitingState();
     void handleWireTestingState1();
     void handleWireTestingState2();
+    void enterCalibratingState();
+    void handleCalibratingState();
+    void leaveCalibratingState();
+    void applyQueuedModel();
     bool debouncedCondition(std::function<bool()> condition, int debounceMs = 10);
 
     // Static task wrapper

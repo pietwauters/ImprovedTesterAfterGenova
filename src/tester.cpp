@@ -1,5 +1,7 @@
 #include "tester.h"
 
+#include "CalibrationService.h"
+#include "CalibrationStore.h"
 #include "DisplayManager.h"
 #include "Hardware.h"
 #include "MeasurementHardware.h"
@@ -148,8 +150,11 @@ void Tester::UpdateThresholdsWithLeadResistance(float RLead) {
 void Tester::begin(bool ForceCalibration) {
     Display.begin();
     mycalibrator.begin(br_analog, bl_analog);
+    calibrationService.begin();
+    calibrationStore.migrateLegacy(mycalibrator);
     // Try to load existing calibration
-    if ((ForceCalibration) || !mycalibrator.load_calibration_from_nvs()) {
+    StoredModel stored;
+    if ((ForceCalibration) || !calibrationStore.loadForPath(kDefaultCalibrationPath, stored)) {
         // No existing calibration, run interactive calibration
         mycalibrator.DoFactoryReset();
         DefaultBlinkColor = LedPanel->m_Red;
@@ -159,7 +164,7 @@ void Tester::begin(bool ForceCalibration) {
             LedPanel->myShow();
 
             if (mycalibrator.calibrate_interactively_empirical()) {
-                mycalibrator.save_calibration_to_nvs();
+                calibrationStore.save(kDefaultCalibrationPath, mycalibrator.model(), 0);
                 LedPanel->ClearAll();
                 LedPanel->myShow();
 
@@ -170,8 +175,10 @@ void Tester::begin(bool ForceCalibration) {
             }
         }
     } else {
+        mycalibrator.setModel(stored.params);
         DefaultBlinkColor = LedPanel->m_Green;
     }
+    calibrationService.setActiveModel(mycalibrator.model());
     LedPanel->SetBlinkColor(DefaultBlinkColor);
     AverageLeadResistance = rtc.retrieve("LeadR", 0.0f);
 
@@ -230,9 +237,20 @@ void Tester::taskLoop() {
     while (true) {
         esp_task_wdt_reset();
 
+        if (currentState == Waiting || currentState == Calibrating) {
+            applyQueuedModel();
+        }
+        if (currentState != Calibrating && calibrationService.isRequested()) {
+            enterCalibratingState();
+        }
+
         switch (currentState) {
             case Waiting:
                 handleWaitingState();
+                break;
+
+            case Calibrating:
+                handleCalibratingState();
                 break;
 
             case WireTesting_1:
@@ -252,6 +270,68 @@ void Tester::taskLoop() {
         esp_task_wdt_reset();
         vTaskDelay(5 / portTICK_PERIOD_MS);  // Small delay to prevent watchdog issues
     }
+}
+
+// A model saved or restored over the web API: use it for all thresholds
+void Tester::applyQueuedModel() {
+    EmpiricalModel m;
+    if (!calibrationService.takeQueuedModel(m)) {
+        return;
+    }
+    mycalibrator.setModel(m);
+    calibrationService.setActiveModel(m);
+    UpdateThresholdsWithLeadResistance(0.0);
+    SetWiretestMode(false);
+    DefaultBlinkColor = LedPanel->m_Green;
+}
+
+void Tester::enterCalibratingState() {
+    currentState = Calibrating;
+    ShowingShape = SHAPE_NONE;
+    SetWiretestMode(false);
+    calibrationService.setActiveModel(mycalibrator.model());
+    calibrationService.setActive(true);
+    printf("[Cal] session started on path %s\n", calibrationService.path().name);
+    ledPanel->ClearAll();
+    ledPanel->Draw_C(ledPanel->m_Blue);
+    ledPanel->myShow();
+    Display.setMode("Calibrating");
+    Display.showMode();
+}
+
+// Measure the selected path continuously; the web API reads the averaged sample
+void Tester::handleCalibratingState() {
+    if (!calibrationService.isRequested()) {
+        printf("[Cal] session ended: /api/cal/end\n");
+        leaveCalibratingState();
+        return;
+    }
+    if (calibrationService.idleTimedOut()) {
+        printf("[Cal] session ended: no API call for %lu s\n", CalibrationService::IdleTimeoutMs / 1000UL);
+        leaveCalibratingState();
+        return;
+    }
+    const CalibrationPath& path = calibrationService.path();
+    EmpiricalResistorCalibrator::EmpiricalReading reading =
+        mycalibrator.measure(path, CalibrationService::SamplesPerReading, false);
+    calibrationService.pushReading(path, reading);
+}
+
+void Tester::leaveCalibratingState() {
+    calibrationService.setActive(false);
+    wifiPowerManager().releaseWiFiLock(CalibrationWiFiLock);
+    wifiPowerManager().recordActivity();  // normal 90 s Wi-Fi timeout from here, not an immediate switch-off
+    applyQueuedModel();
+    UpdateThresholdsWithLeadResistance(0.0);
+    SetWiretestMode(false);
+    LedPanel->SetBlinkColor(AverageLeadResistance > 0.0f ? LedPanel->m_Blue : DefaultBlinkColor);
+    ledPanel->ClearAll();
+    ledPanel->myShow();
+    ledPanel->RestartBlink();
+    currentState = Waiting;
+    restartSleepGrace();
+    Display.setMode("Waiting");
+    Display.showMode();
 }
 
 void Tester::handleWaitingState() {

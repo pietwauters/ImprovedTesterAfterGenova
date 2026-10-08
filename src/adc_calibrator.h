@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CalibrationPaths.h"
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
 
@@ -8,6 +9,32 @@ constexpr float Default_v_gpio = 3.1290;
 constexpr float Default_r1_r2 = 116.0;
 constexpr float Default_correction = 1.0;
 
+// Calibration verdict limits: every point's resistance error must stay within these
+constexpr float CalExcellentPercent = 2.0f;  // target
+constexpr float CalPassPercent = 5.0f;       // above this the calibration fails and is not saved
+
+constexpr int CalMinPoints = 4;
+constexpr int CalMaxPoints = 8;
+
+// Parameters of the empirical model V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
+struct EmpiricalModel {
+    float v_gpio;      // Effective GPIO voltage (V)
+    float r1_r2;       // Combined fixed resistance (Ohm)
+    float correction;  // Current-dependent correction factor (Ohm^2)
+};
+
+enum CalVerdict { CalExcellent, CalPass, CalFail };
+const char* calVerdictName(CalVerdict verdict);
+
+// How well a model reproduces a set of known resistors
+struct CalEvaluation {
+    float r_est[CalMaxPoints];    // resistance the model reads for each point (Ohm, -1 = no solution)
+    float err_pct[CalMaxPoints];  // |r_est - r_ref| / r_ref * 100
+    float rms_mv;                 // RMS of model voltage - measured voltage
+    float max_err_pct;
+    CalVerdict verdict;
+};
+
 // Empirical resistor calibrator using your proven model:
 // V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
 class EmpiricalResistorCalibrator {
@@ -15,7 +42,7 @@ class EmpiricalResistorCalibrator {
     // Initialize with ADC channel for differential measurement
     bool begin(adc1_channel_t adc_channel_top, adc1_channel_t adc_channel_bottom);
 
-    // Interactive calibration using multiple known resistors (least squares)
+    // Interactive calibration over the serial port, on the default calibration path
     bool calibrate_interactively_empirical();
 
     // Get resistance from differential measurement using empirical model
@@ -28,24 +55,39 @@ class EmpiricalResistorCalibrator {
     // DEPRECATED: returns raw ADC counts, not millivolts — unit mismatch with getDifferentialSample().
     uint32_t get_adc_threshold_for_resistance_with_leads(float resistance_threshold, float lead_resistance = 0.0f);
 
-    // Save/load calibration
+    // Legacy single-model storage (namespace "emp_cal"); CalibrationStore migrates from it
     bool save_calibration_to_nvs(const char* nvs_namespace = "emp_cal");
     bool load_calibration_from_nvs(const char* nvs_namespace = "emp_cal");
-    void DoFactoryReset() {
-        v_gpio = Default_v_gpio;          // Effective GPIO voltage
-        r1_r2 = Default_r1_r2;            // Combined fixed resistance
-        correction = Default_correction;  // Current-dependent correction factor
-    };
+    void DoFactoryReset() { setModel(factoryModel()); };
 
     // Measurement functions
     struct EmpiricalReading {
         float v_top;
         float v_bottom;
         float v_diff;
+        float v_diff_sd_mv;  // standard deviation of the per-sample V_diff (mV)
+        int samples_used;    // samples left after trimming outliers
         float resistance;
     };
 
-    EmpiricalReading read_differential_empirical(int samples = 100);
+    // Drive the terminals of a calibration path and measure it
+    EmpiricalReading measure(const CalibrationPath& path, int samples = 100, bool verbose = true);
+
+    // Model access
+    EmpiricalModel model() const { return {v_gpio, r1_r2, correction}; }
+    void setModel(const EmpiricalModel& m) {
+        v_gpio = m.v_gpio;
+        r1_r2 = m.r1_r2;
+        correction = m.correction;
+    }
+    static EmpiricalModel factoryModel() { return {Default_v_gpio, Default_r1_r2, Default_correction}; }
+
+    // Pure model maths, no hardware access. Voltages in V, resistances in Ohm.
+    static float modelVoltage(const EmpiricalModel& m, float r_ohm);
+    static float modelResistance(const EmpiricalModel& m, float v_diff);
+    // Fit the model to known resistors; v_gpio is taken from the open-circuit reading
+    static EmpiricalModel fit(const float* r_ref, const float* v_diff, int n, float v_gpio_open);
+    static CalEvaluation evaluate(const EmpiricalModel& m, const float* r_ref, const float* v_diff, int n);
 
     // Getters for calibration parameters
     float get_v_gpio() const { return v_gpio; }
@@ -75,17 +117,15 @@ class EmpiricalResistorCalibrator {
 
     // Helper functions
     float calculate_model_voltage(float R_known, float v_gpio, float r1_r2, float correction) const;
-    float voltage_to_resistance(float v_diff, float v_gpio, float r1_r2, float correction);
-    bool least_squares_fit(float* R_values, float* V_diff_values, int num_points);
     int voltage_to_adc_raw(float voltage);  // Convert voltage to ADC raw value
     void wait_for_enter();
     float read_float_from_uart();                  // ESP32-safe float input with WDT reset
     char read_char_from_uart(long timeout = 999);  // ESP32-safe char input with WDT reset
 
     // Multi-stage calibration helper functions
-    float optimize_slope_weighted(float* R_values, float* V_diff_values, int num_points, float v_gpio_open);
-    float optimize_correction_sweep(float* R_values, float* V_diff_values, int num_points, float v_gpio_open,
-                                    float r1_r2_fixed);
-    void show_calibration_quality(float* R_values, float* V_diff_values, int num_points);
-    void interactive_parameter_tuning(float* R_values, float* V_diff_values, int num_points);
+    static float optimize_slope_weighted(const float* R_values, const float* V_diff_values, int num_points,
+                                         float v_gpio_open, float correction);
+    static float optimize_correction_sweep(const float* R_values, const float* V_diff_values, int num_points,
+                                           float v_gpio_open, float r1_r2_fixed);
+    void show_calibration_quality(const float* R_values, const float* V_diff_values, int num_points);
 };

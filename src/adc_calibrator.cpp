@@ -5,6 +5,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "MeasurementHardware.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_vfs_dev.h"
@@ -38,28 +39,51 @@ bool EmpiricalResistorCalibrator::begin(adc1_channel_t adc_channel_top, adc1_cha
     return true;
 }
 
-EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::read_differential_empirical(int samples) {
+
+const char* calVerdictName(CalVerdict verdict) {
+    switch (verdict) {
+        case CalExcellent:
+            return "excellent";
+        case CalPass:
+            return "pass";
+        default:
+            return "fail";
+    }
+}
+
+EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::measure(const CalibrationPath& path,
+                                                                                   int samples, bool verbose) {
     EmpiricalReading result;
     // Use the same successful approach as the working differential calibrator
     const float trim_percent = 0.2f;  // Remove 20% outliers like the working differential calibrator
+
+    MeasurementHardware::Set_IODirectionAndValue(path.ioDirection, path.ioValues);
+    vTaskDelay(pdMS_TO_TICKS(2));  // let the terminals settle after switching
 
     // Allocate arrays for calibrated voltage samples (in millivolts)
     uint32_t* mv_top_samples = new uint32_t[samples];
     uint32_t* mv_bottom_samples = new uint32_t[samples];
 
     // Take samples from both channels and convert to millivolts immediately
+    double sum_diff = 0.0, sum_diff_sq = 0.0;
     for (int i = 0; i < samples; ++i) {
         esp_task_wdt_reset();  // Reset WDT every iteration
 
-        uint32_t raw_top = adc1_get_raw(channel_top);
-        uint32_t raw_bottom = adc1_get_raw(channel_bottom);
+        uint32_t raw_top = adc1_get_raw(path.top);
+        uint32_t raw_bottom = adc1_get_raw(path.bottom);
 
         // Convert each raw sample to millivolts using eFuse calibration
         mv_top_samples[i] = esp_adc_cal_raw_to_voltage(raw_top, &adc_chars);
         mv_bottom_samples[i] = esp_adc_cal_raw_to_voltage(raw_bottom, &adc_chars);
+        double diff = (double)mv_top_samples[i] - (double)mv_bottom_samples[i];
+        sum_diff += diff;
+        sum_diff_sq += diff * diff;
         if (i < samples - 1)
             vTaskDelay(pdMS_TO_TICKS(1));
     }
+    double mean_diff = sum_diff / samples;
+    double var_diff = sum_diff_sq / samples - mean_diff * mean_diff;
+    result.v_diff_sd_mv = var_diff > 0 ? (float)sqrt(var_diff) : 0.0f;
 
     // Sort arrays to identify outliers (sorting millivolt values now)
     for (int i = 0; i < samples - 1; i++) {
@@ -90,25 +114,22 @@ EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::read_
         sum_mv_bottom += mv_bottom_samples[i];
     }
 
-    uint32_t avg_mv_top = sum_mv_top / valid_samples;
-    uint32_t avg_mv_bottom = sum_mv_bottom / valid_samples;
-
     // Clean up arrays
     delete[] mv_top_samples;
     delete[] mv_bottom_samples;
 
-    // Convert millivolts to volts
-    result.v_top = avg_mv_top / 1000.0f;
-    result.v_bottom = avg_mv_bottom / 1000.0f;
+    // Convert millivolts to volts (keep the fraction of a mV the averaging gives)
+    result.v_top = (float)sum_mv_top / valid_samples / 1000.0f;
+    result.v_bottom = (float)sum_mv_bottom / valid_samples / 1000.0f;
     result.v_diff = result.v_top - result.v_bottom;
+    result.samples_used = valid_samples;
 
-    printf("Empirical differential result (trimmed mean): v_top=%.3f V, v_bottom=%.3f V, v_diff=%.3f V\n", result.v_top,
-           result.v_bottom, result.v_diff);
-    printf("  Used %d samples (removed %d outliers from each end)\n", valid_samples, trim_count);
-
-    // DEBUG: Show final calculated values to help diagnose 0mV readings
-    printf("DEBUG: Final averages - top=%lumV, bottom=%lumV, difference=%ldmV\n", avg_mv_top, avg_mv_bottom,
-           (long)(avg_mv_top - avg_mv_bottom));
+    if (verbose) {
+        printf("Empirical differential result (trimmed mean): v_top=%.4f V, v_bottom=%.4f V, v_diff=%.4f V\n",
+               result.v_top, result.v_bottom, result.v_diff);
+        printf("  Used %d samples (removed %d outliers from each end), V_diff spread %.2f mV\n", valid_samples,
+               trim_count, result.v_diff_sd_mv);
+    }
 
     // For empirical model: V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
     // The V_diff in this model is the voltage ACROSS the unknown resistor
@@ -119,11 +140,15 @@ EmpiricalResistorCalibrator::EmpiricalReading EmpiricalResistorCalibrator::read_
 }
 
 float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measured) const {
-    if (v_gpio <= 0 || r1_r2 <= 0) {
+    return modelResistance(model(), v_diff_measured);
+}
+
+float EmpiricalResistorCalibrator::modelResistance(const EmpiricalModel& m, float v_diff_measured) {
+    if (m.v_gpio <= 0 || m.r1_r2 <= 0) {
         return -1.0f;  // Not calibrated
     }
 
-    if (v_diff_measured <= 0 || v_diff_measured >= v_gpio) {
+    if (v_diff_measured <= 0 || v_diff_measured >= m.v_gpio) {
         return -1.0f;  // Invalid measurement
     }
 
@@ -134,9 +159,9 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
     // Rearrange: (V_diff_measured - V_gpio) * R² + V_diff_measured * R1_R2 * R + V_diff_measured * Correction = 0
     // Standard form: a*R^2 + b*R + c = 0
 
-    float a = v_diff_measured - v_gpio;  // This is negative since v_diff < v_gpio
-    float b = v_diff_measured * r1_r2;
-    float c = v_diff_measured * correction;
+    float a = v_diff_measured - m.v_gpio;  // This is negative since v_diff < v_gpio
+    float b = v_diff_measured * m.r1_r2;
+    float c = v_diff_measured * m.correction;
 
     if (fabs(a) < 1e-9) {
         return -1.0f;  // Degenerate case
@@ -150,10 +175,6 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
     }
 
     float sqrt_discriminant = sqrtf(discriminant);
-    /*
-    float r1 = (-b + sqrt_discriminant) / (2 * a);
-    float r2 = (-b - sqrt_discriminant) / (2 * a);
-*/
 
     // Numerically stable solution
     float q = -0.5f * (b + (b > 0 ? sqrt_discriminant : -sqrt_discriminant));
@@ -172,6 +193,12 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
     } else {
         return -1.0f;  // No positive solution
     }
+}
+
+float EmpiricalResistorCalibrator::modelVoltage(const EmpiricalModel& m, float R_known) {
+    if (R_known <= 0.001f)  // Use small threshold instead of exact zero to avoid division issues
+        return 0.0f;
+    return m.v_gpio * R_known / (R_known + m.r1_r2 + m.correction / R_known);
 }
 
 uint32_t EmpiricalResistorCalibrator::get_adc_threshold_for_resistance_with_leads(float resistance_threshold,
@@ -277,45 +304,6 @@ int EmpiricalResistorCalibrator::voltage_to_adc_raw(float voltage) {
     return result;
 }
 
-// Helper function to convert voltage back to resistance using empirical model
-// Solves: V_diff = V_gpio * R / (R + R1_R2 + correction/R) for R
-/*
-float EmpiricalResistorCalibrator::voltage_to_resistance(float v_diff, float v_gpio, float r1_r2, float correction) {
-    if (v_diff <= 0 || v_gpio <= 0)
-        return -1.0f;
-
-    // From V_diff = V_gpio * R / (R + R1_R2 + Correction/R)
-    // Rearranging: V_diff * (R + R1_R2 + Correction/R) = V_gpio * R
-    // Multiplying by R: V_diff * R^2 + V_diff * R1_R2 * R + V_diff * Correction = V_gpio * R^2
-    // Rearranged: (V_diff - V_gpio) * R^2 + V_diff * R1_R2 * R + V_diff * Correction = 0
-
-    float a = v_diff - v_gpio;
-    float b = v_diff * r1_r2;
-    float c = v_diff * correction;
-
-    // Quadratic formula: R = (-b ± sqrt(b^2 - 4ac)) / (2a)
-    float discriminant = b * b - 4 * a * c;
-
-    if (discriminant < 0)
-        return -1.0f;  // No real solution
-
-    float sqrt_discriminant = sqrt(discriminant);
-    float r1 = (-b + sqrt_discriminant) / (2 * a);
-    float r2 = (-b - sqrt_discriminant) / (2 * a);
-
-    // Return the positive solution that makes physical sense
-    // Since a < 0 (V_diff < V_gpio), we typically want the larger positive root
-    if (r1 > 0 && r2 > 0) {
-        return (r1 > r2) ? r1 : r2;  // Return larger positive value
-    } else if (r1 > 0) {
-        return r1;
-    } else if (r2 > 0) {
-        return r2;
-    }
-
-    return -1.0f;  // No valid solution
-}
-*/
 // Golden section search: finds the minimum of a unimodal function on [a, b] to within tol.
 // Converges in ~log(tol/(b-a)) / log(0.618) evaluations — far fewer than a linear sweep.
 template <typename CostFn>
@@ -344,12 +332,13 @@ static float golden_min(CostFn cost, float a, float b, float tol = 0.05f) {
 
 // Helper function for weighted slope optimization using relative errors
 // Uses hybrid weighting to balance accuracy across the full resistance range
-float EmpiricalResistorCalibrator::optimize_slope_weighted(float* R_values, float* V_diff_values, int num_points,
-                                                           float v_gpio_open) {
+float EmpiricalResistorCalibrator::optimize_slope_weighted(const float* R_values, const float* V_diff_values,
+                                                           int num_points, float v_gpio_open, float correction) {
     auto cost = [&](float r1_r2_test) {
+        EmpiricalModel m = {v_gpio_open, r1_r2_test, correction};
         float weighted_error = 0.0f, total_weight = 0.0f;
         for (int i = 0; i < num_points; i++) {
-            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_test, this->correction);
+            float V_predicted = modelVoltage(m, R_values[i]);
             float relative_error = (V_predicted - V_diff_values[i]) / V_diff_values[i];
             // Hybrid weighting: bias toward high R where R1_R2 has most effect
             float weight = R_values[i] + 0.5f / (R_values[i] + 0.1f);
@@ -363,12 +352,13 @@ float EmpiricalResistorCalibrator::optimize_slope_weighted(float* R_values, floa
 
 // Helper function for correction factor sweep optimization using relative errors
 // Emphasizes low R values where correction term has maximum effect
-float EmpiricalResistorCalibrator::optimize_correction_sweep(float* R_values, float* V_diff_values, int num_points,
-                                                             float v_gpio_open, float r1_r2_fixed) {
+float EmpiricalResistorCalibrator::optimize_correction_sweep(const float* R_values, const float* V_diff_values,
+                                                             int num_points, float v_gpio_open, float r1_r2_fixed) {
     auto cost = [&](float correction_test) {
+        EmpiricalModel m = {v_gpio_open, r1_r2_fixed, correction_test};
         float weighted_error = 0.0f, total_weight = 0.0f;
         for (int i = 0; i < num_points; i++) {
-            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, r1_r2_fixed, correction_test);
+            float V_predicted = modelVoltage(m, R_values[i]);
             float relative_error = (V_predicted - V_diff_values[i]) / V_diff_values[i];
             // Inverse weighting: emphasize low R where Correction/R term dominates
             float weight = 1.0f / (R_values[i] + 0.1f);
@@ -380,161 +370,68 @@ float EmpiricalResistorCalibrator::optimize_correction_sweep(float* R_values, fl
     return golden_min(cost, -100.0f, 150.0f);
 }
 
-// Helper function to show calibration quality metrics
-void EmpiricalResistorCalibrator::show_calibration_quality(float* R_values, float* V_diff_values, int num_points) {
-    float rms_error = 0.0f;
-    float max_error_abs = 0.0f;
-    float max_error_percent = 0.0f;
-    int good_count = 0, fair_count = 0, poor_count = 0;
+// Iterative refinement: R1_R2 and Correction are coupled, so optimize them in turn
+EmpiricalModel EmpiricalResistorCalibrator::fit(const float* r_ref, const float* v_diff, int n, float v_gpio_open) {
+    EmpiricalModel m = {v_gpio_open, 100.0f, 0.0f};  // initial guess, no correction
+    const int max_iterations = 10;
+    for (int iter = 0; iter < max_iterations; iter++) {
+        m.r1_r2 = optimize_slope_weighted(r_ref, v_diff, n, v_gpio_open, m.correction);
+        m.correction = optimize_correction_sweep(r_ref, v_diff, n, v_gpio_open, m.r1_r2);
+    }
+    return m;
+}
+
+CalEvaluation EmpiricalResistorCalibrator::evaluate(const EmpiricalModel& m, const float* r_ref, const float* v_diff,
+                                                    int n) {
+    CalEvaluation e = {};
+    float sum_sq_mv = 0.0f;
+    for (int i = 0; i < n && i < CalMaxPoints; i++) {
+        float error_mv = (modelVoltage(m, r_ref[i]) - v_diff[i]) * 1000.0f;
+        sum_sq_mv += error_mv * error_mv;
+        e.r_est[i] = modelResistance(m, v_diff[i]);
+        // No solution counts as an infinitely bad point
+        e.err_pct[i] = e.r_est[i] > 0 ? fabsf(e.r_est[i] - r_ref[i]) / r_ref[i] * 100.0f : 1000.0f;
+        if (e.err_pct[i] > e.max_err_pct) {
+            e.max_err_pct = e.err_pct[i];
+        }
+    }
+    e.rms_mv = n > 0 ? sqrtf(sum_sq_mv / n) : 0.0f;
+    if (e.max_err_pct <= CalExcellentPercent) {
+        e.verdict = CalExcellent;
+    } else if (e.max_err_pct <= CalPassPercent) {
+        e.verdict = CalPass;
+    } else {
+        e.verdict = CalFail;
+    }
+    return e;
+}
+
+// Print how well the active model reproduces the calibration points
+void EmpiricalResistorCalibrator::show_calibration_quality(const float* R_values, const float* V_diff_values,
+                                                           int num_points) {
+    CalEvaluation e = evaluate(model(), R_values, V_diff_values, num_points);
 
     printf("Calibration Point Verification:\n");
-    printf("R_actual   V_measured   V_model   Error_mV   Error_%%\n");
+    printf("R_actual   V_measured   V_model   R_model   Error_%%\n");
     printf("------------------------------------------------------\n");
-
     for (int i = 0; i < num_points; i++) {
-        float V_predicted = calculate_model_voltage(R_values[i], this->v_gpio, this->r1_r2, this->correction);
-        float error_mv = (V_predicted - V_diff_values[i]) * 1000.0f;
-        float error_percent = fabs(error_mv) / (V_diff_values[i] * 1000.0f) * 100.0f;
-
-        printf("%7.2f    %8.1f     %7.1f    %7.1f     %5.1f\n", R_values[i], V_diff_values[i] * 1000,
-               V_predicted * 1000, error_mv, error_percent);
-
-        rms_error += error_mv * error_mv;
-        if (fabs(error_mv) > max_error_abs)
-            max_error_abs = fabs(error_mv);
-        if (error_percent > max_error_percent)
-            max_error_percent = error_percent;
-
-        if (error_percent < 2.0f)
-            good_count++;
-        else if (error_percent < 5.0f)
-            fair_count++;
-        else
-            poor_count++;
+        printf("%7.2f    %8.1f     %7.1f   %7.3f    %5.2f\n", R_values[i], V_diff_values[i] * 1000,
+               modelVoltage(model(), R_values[i]) * 1000, e.r_est[i], e.err_pct[i]);
     }
-
-    rms_error = sqrt(rms_error / num_points);
-
     printf("------------------------------------------------------\n");
-    printf("Quality Metrics:\n");
-    printf("  RMS Error: %.1f mV\n", rms_error);
-    printf("  Max Error: %.1f mV (%.1f%%)\n", max_error_abs, max_error_percent);
-    printf("  Accuracy Distribution: %d excellent (<2%%), %d good (<5%%), %d poor (>5%%)\n", good_count, fair_count,
-           poor_count);
-
-    if (max_error_percent < 2.0f) {
-        printf("  ✓ EXCELLENT calibration quality\n");
-    } else if (max_error_percent < 5.0f) {
-        printf("  ✓ GOOD calibration quality\n");
-    } else if (max_error_percent < 10.0f) {
-        printf("  ⚠ FAIR calibration quality - consider fine-tuning\n");
-    } else {
-        printf("  ✗ POOR calibration quality - needs improvement\n");
-    }
-}
-
-// Helper function for interactive parameter tuning
-void EmpiricalResistorCalibrator::interactive_parameter_tuning(float* R_values, float* V_diff_values, int num_points) {
-    while (true) {
-        printf("Current: R1_R2=%.1fΩ, Correction=%.1fΩ²\n", this->r1_r2, this->correction);
-        printf("Commands: 'r' adjust R1_R2, 'c' adjust correction, 's' show results, 'q' finish: ");
-        fflush(stdout);
-
-        char cmd = read_char_from_uart();
-        printf("%c\n", cmd);
-
-        if (cmd == 'q' || cmd == 'Q') {
-            break;
-        } else if (cmd == 'r' || cmd == 'R') {
-            printf("Enter new R1_R2 value (current=%.1f): ", this->r1_r2);
-            fflush(stdout);
-            float new_r1_r2 = read_float_from_uart();
-            if (new_r1_r2 > 0) {
-                this->r1_r2 = new_r1_r2;
-                printf("R1_R2 updated to %.1f Ω\n", this->r1_r2);
-            }
-        } else if (cmd == 'c' || cmd == 'C') {
-            printf("Enter new Correction value (current=%.1f): ", this->correction);
-            fflush(stdout);
-            float new_correction = read_float_from_uart();
-            // if (new_correction >= 0) {
-            this->correction = new_correction;
-            printf("Correction updated to %.1f Ω²\n", this->correction);
-            //}
-        } else if (cmd == 's' || cmd == 'S') {
-            show_calibration_quality(R_values, V_diff_values, num_points);
-        }
-        printf("\n");
-    }
-}
-
-bool EmpiricalResistorCalibrator::least_squares_fit(float* R_values, float* V_diff_values, int num_points) {
-    // Simple iterative optimization using gradient descent
-    // Initial guess
-    float v_gpio_est = 3.0f;       // Start with reasonable guess
-    float r1_r2_est = 100.0f;      // Start with reasonable guess
-    float correction_est = 30.0f;  // Start with reasonable guess
-
-    const float learning_rate = 0.001f;
-    const int max_iterations = 1000;
-    const float tolerance = 1e-6f;
-
-    for (int iter = 0; iter < max_iterations; iter++) {
-        float total_error = 0.0f;
-        float grad_v_gpio = 0.0f;
-        float grad_r1_r2 = 0.0f;
-        float grad_correction = 0.0f;
-
-        // Calculate gradients
-        for (int i = 0; i < num_points; i++) {
-            float R = R_values[i];
-            float V_measured = V_diff_values[i];
-            float V_model = calculate_model_voltage(R, v_gpio_est, r1_r2_est, correction_est);
-            float error = V_measured - V_model;
-            total_error += error * error;
-
-            // Partial derivatives (simplified numerical approximation)
-            float denominator = R + r1_r2_est + correction_est / R;
-            if (denominator > 0) {
-                grad_v_gpio += -2 * error * R / denominator;
-                grad_r1_r2 += -2 * error * (-v_gpio_est * R) / (denominator * denominator);
-                grad_correction += -2 * error * (-v_gpio_est * R / R) / (denominator * denominator);
-            }
-        }
-
-        // Update parameters
-        v_gpio_est -= learning_rate * grad_v_gpio;
-        r1_r2_est -= learning_rate * grad_r1_r2;
-        correction_est -= learning_rate * grad_correction;
-
-        // Clamp to reasonable ranges
-        v_gpio_est = fmaxf(2.0f, fminf(4.0f, v_gpio_est));
-        r1_r2_est = fmaxf(50.0f, fminf(200.0f, r1_r2_est));
-        correction_est = fmaxf(1.0f, fminf(100.0f, correction_est));
-
-        if (total_error < tolerance) {
-            break;
-        }
-    }
-
-    // Store results
-    this->v_gpio = v_gpio_est;
-    this->r1_r2 = r1_r2_est;
-    this->correction = correction_est;
-
-    printf("Empirical calibration results:\n");
-    printf("  V_gpio = %.1f mV\n", v_gpio_est * 1000);
-    printf("  R1_R2 = %.1f Ω\n", r1_r2_est);
-    printf("  Correction = %.1f Ω²\n", correction_est);
-
-    return true;
+    printf("  RMS Error: %.2f mV\n", e.rms_mv);
+    printf("  Max resistance error: %.2f%% (target %.0f%%, limit %.0f%%)\n", e.max_err_pct, CalExcellentPercent,
+           CalPassPercent);
+    printf("  Verdict: %s\n", calVerdictName(e.verdict));
 }
 
 bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
+    const CalibrationPath& path = kDefaultCalibrationPath;
+
     printf("\n=== EMPIRICAL RESISTANCE CALIBRATOR ===\n");
     printf("This calibrator uses the empirical model:\n");
     printf("V_diff = V_gpio_open * R / (R + R1_R2 + Correction/R)\n");
-    printf("Multi-stage calibration: Reference → Data → Slope → Correction → Fine-tune\n\n");
+    printf("Calibration path: %s\n\n", path.name);
 
     // Step 0: Measure open circuit reference voltage
     printf("=== STEP 0: REFERENCE MEASUREMENT ===\n");
@@ -547,7 +444,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
     }
 
     printf("Measuring open circuit voltage...\n");
-    EmpiricalReading open_reading = read_differential_empirical(50);
+    EmpiricalReading open_reading = measure(path, 50);
     float v_gpio_open = open_reading.v_top;  // Use top voltage as reference
 
     printf("Open circuit measurements:\n");
@@ -562,26 +459,26 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
 
     // Step 1: Data collection
     printf("=== STEP 1: DATA COLLECTION ===\n");
-    const int MAX_CALIBRATION_POINTS = 8;
-    float R_values[MAX_CALIBRATION_POINTS];
-    float V_diff_values[MAX_CALIBRATION_POINTS];
+    float R_values[CalMaxPoints];
+    float V_diff_values[CalMaxPoints];
     int num_points = 0;
 
     printf("Now collect calibration data points with known resistors.\n");
     printf("Suggest: 1, 2, 3, 5, 8, 10, 12 ohms for good coverage.\n\n");
-    printf("Know resistor must be connected between top and bottom 20mm sockets (mass)!\n\n");
+    printf("Known resistor must be connected on path %s (top socket to bottom socket)!\n\n", path.name);
 
-    while (num_points < MAX_CALIBRATION_POINTS) {
-        printf("[Point %d] Enter known resistance value (0 to finish, need minimum 4): ", num_points + 1);
+    while (num_points < CalMaxPoints) {
+        printf("[Point %d] Enter known resistance value (0 to finish, need minimum %d): ", num_points + 1,
+               CalMinPoints);
         fflush(stdout);
 
         float R_known = read_float_from_uart();
 
         if (R_known <= 0) {
-            if (num_points >= 4) {
+            if (num_points >= CalMinPoints) {
                 break;
             } else {
-                printf("Need at least 4 calibration points for multi-stage fitting!\n");
+                printf("Need at least %d calibration points for multi-stage fitting!\n", CalMinPoints);
                 continue;
             }
         }
@@ -590,7 +487,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
         wait_for_enter();
 
         // Measure differential voltage
-        EmpiricalReading reading = read_differential_empirical(100);
+        EmpiricalReading reading = measure(path, 100);
 
         printf("Measured: R=%.2fΩ → V_diff=%.1fmV (V_top=%.1fmV, V_bottom=%.1fmV)\n", R_known, reading.v_diff * 1000,
                reading.v_top * 1000, reading.v_bottom * 1000);
@@ -606,78 +503,23 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
         printf("\n");
     }
 
-    if (num_points < 4) {
-        printf("Insufficient calibration points. Need at least 4.\n");
-        return false;
-    }
-
     printf("Collected %d calibration points.\n\n", num_points);
 
-    // Step 2: Iterative optimization to handle parameter coupling
-    printf("=== STEP 2: ITERATIVE PARAMETER OPTIMIZATION ===\n");
-    printf("Using iterative refinement to find optimal parameters...\n\n");
+    // Step 2: Fit
+    printf("=== STEP 2: PARAMETER OPTIMIZATION ===\n");
+    EmpiricalModel fitted = fit(R_values, V_diff_values, num_points, v_gpio_open);
+    setModel(fitted);
+    printf("  V_gpio_open = %.1f mV\n", fitted.v_gpio * 1000);
+    printf("  R1_R2 = %.1f Ω\n", fitted.r1_r2);
+    printf("  Correction = %.1f Ω²\n\n", fitted.correction);
 
-    // Initialize with reasonable starting values
-    this->v_gpio = v_gpio_open;
-    this->r1_r2 = 100.0f;     // Initial guess
-    this->correction = 0.0f;  // Start with no correction
-
-    float best_r1_r2 = this->r1_r2;
-    float best_correction = this->correction;
-
-    // Iterate to refine both parameters (handles coupling between R1_R2 and Correction)
-    const int max_iterations = 10;
-    for (int iter = 0; iter < max_iterations; iter++) {
-        printf("Iteration %d:\n", iter + 1);
-
-        // Optimize R1_R2 with current correction value
-        best_r1_r2 = optimize_slope_weighted(R_values, V_diff_values, num_points, v_gpio_open);
-        this->r1_r2 = best_r1_r2;
-        printf("  R1_R2 = %.1f Ω\n", best_r1_r2);
-
-        // Optimize Correction with updated R1_R2 value
-        best_correction = optimize_correction_sweep(R_values, V_diff_values, num_points, v_gpio_open, best_r1_r2);
-        this->correction = best_correction;
-        printf("  Correction = %.1f Ω²\n", best_correction);
-
-        // Show iteration quality
-        float rms_error = 0.0f;
-        for (int i = 0; i < num_points; i++) {
-            float V_predicted = calculate_model_voltage(R_values[i], v_gpio_open, best_r1_r2, best_correction);
-            float error = (V_predicted - V_diff_values[i]) * 1000.0f;
-            rms_error += error * error;
-        }
-        rms_error = sqrt(rms_error / num_points);
-        printf("  RMS Error = %.2f mV\n\n", rms_error);
+    // Step 3: Result
+    printf("=== STEP 3: RESULT ===\n");
+    show_calibration_quality(R_values, V_diff_values, num_points);
+    if (evaluate(fitted, R_values, V_diff_values, num_points).verdict == CalFail) {
+        printf("\nCalibration FAILED: a point is more than %.0f%% off. Not saved.\n", CalPassPercent);
+        return false;
     }
-
-    printf("Final optimized parameters:\n");
-    printf("  R1_R2 = %.1f Ω\n", best_r1_r2);
-    printf("  Correction = %.1f Ω²\n\n", best_correction);
-
-    // Step 3: Show preliminary results with quality metrics
-    printf("=== STEP 3: PRELIMINARY RESULTS ===\n");
-    this->v_gpio = v_gpio_open;
-    this->r1_r2 = best_r1_r2;
-    this->correction = best_correction;
-
-    show_calibration_quality(R_values, V_diff_values, num_points);
-
-    // Step 4: Interactive fine-tuning
-    printf("\n=== STEP 4: INTERACTIVE FINE-TUNING ===\n");
-    printf("You can now manually adjust parameters for better fit.\n");
-    printf("Commands: 'r' adjust R1_R2, 'c' adjust correction, 's' show results, 'q' finish\n\n");
-
-    interactive_parameter_tuning(R_values, V_diff_values, num_points);
-
-    // Final verification
-    printf("\n=== CALIBRATION COMPLETE ===\n");
-    show_calibration_quality(R_values, V_diff_values, num_points);
-
-    printf("Final parameters:\n");
-    printf("  V_gpio_open = %.1f mV\n", this->v_gpio * 1000);
-    printf("  R1_R2 = %.1f Ω\n", this->r1_r2);
-    printf("  Correction = %.1f Ω²\n", this->correction);
 
     // Interactive verification phase - test with different resistors
     printf("\n=== EMPIRICAL CALIBRATION VERIFICATION ===\n");
@@ -697,7 +539,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
 
         // Measure the unknown resistor
         printf("Measuring unknown resistor...\n");
-        EmpiricalReading test_reading = read_differential_empirical(100);
+        EmpiricalReading test_reading = measure(path, 100);
 
         if (test_reading.v_diff <= 0) {
             printf("Invalid reading: V_diff=%.1fmV. Check connections.\n", test_reading.v_diff * 1000);
@@ -729,12 +571,12 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
             float error_percent = (error_abs / actual_resistance) * 100.0f;
             printf("  Actual = %.2f Ω, Error = %.2f Ω (%.1f%%)\n", actual_resistance, error_abs, error_percent);
 
-            if (error_percent < 5.0f) {
-                printf("  ✓ GOOD: Error < 5%%\n");
-            } else if (error_percent < 10.0f) {
-                printf("  ⚠ FAIR: Error 5-10%%\n");
+            if (error_percent <= CalExcellentPercent) {
+                printf("  ✓ EXCELLENT: Error <= %.0f%%\n", CalExcellentPercent);
+            } else if (error_percent <= CalPassPercent) {
+                printf("  ✓ PASS: Error <= %.0f%%\n", CalPassPercent);
             } else {
-                printf("  ✗ POOR: Error > 10%% - Consider recalibration\n");
+                printf("  ✗ FAIL: Error > %.0f%% - Consider recalibration\n", CalPassPercent);
             }
         }
         printf("\n");
@@ -742,6 +584,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
 
     return true;
 }
+
 
 void EmpiricalResistorCalibrator::wait_for_enter() {
     printf("Press ENTER to continue...");
