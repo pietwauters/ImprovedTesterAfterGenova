@@ -85,7 +85,8 @@ class EmpiricalResistorCalibrator {
     // Pure model maths, no hardware access. Voltages in V, resistances in Ohm.
     static float modelVoltage(const EmpiricalModel& m, float r_ohm);
     static float modelResistance(const EmpiricalModel& m, float v_diff);
-    // Fit the model to known resistors; v_gpio is taken from the open-circuit reading
+    // Fit the model to known resistors; v_gpio is taken from the open-circuit reading.
+    // Minimises the squared relative resistance error, the quantity the verdict judges.
     static EmpiricalModel fit(const float* r_ref, const float* v_diff, int n, float v_gpio_open);
     static CalEvaluation evaluate(const EmpiricalModel& m, const float* r_ref, const float* v_diff, int n);
 
@@ -123,6 +124,8 @@ class EmpiricalResistorCalibrator {
     char read_char_from_uart(long timeout = 999);  // ESP32-safe char input with WDT reset
 
     // Multi-stage calibration helper functions
+    static EmpiricalModel fitVoltage(const float* r_ref, const float* v_diff, int n, float v_gpio_open);
+    static double resistanceCost(const EmpiricalModel& m, const float* r_ref, const float* v_diff, int n);
     static float optimize_slope_weighted(const float* R_values, const float* V_diff_values, int num_points,
                                          float v_gpio_open, float correction);
     static float optimize_correction_sweep(const float* R_values, const float* V_diff_values, int num_points,

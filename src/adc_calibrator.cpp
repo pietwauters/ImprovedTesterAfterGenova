@@ -370,8 +370,10 @@ float EmpiricalResistorCalibrator::optimize_correction_sweep(const float* R_valu
     return golden_min(cost, -100.0f, 150.0f);
 }
 
-// Iterative refinement: R1_R2 and Correction are coupled, so optimize them in turn
-EmpiricalModel EmpiricalResistorCalibrator::fit(const float* r_ref, const float* v_diff, int n, float v_gpio_open) {
+// Iterative refinement: R1_R2 and Correction are coupled, so optimize them in turn.
+// Fits relative voltage errors; used as the starting point of fit().
+EmpiricalModel EmpiricalResistorCalibrator::fitVoltage(const float* r_ref, const float* v_diff, int n,
+                                                       float v_gpio_open) {
     EmpiricalModel m = {v_gpio_open, 100.0f, 0.0f};  // initial guess, no correction
     const int max_iterations = 10;
     for (int iter = 0; iter < max_iterations; iter++) {
@@ -379,6 +381,104 @@ EmpiricalModel EmpiricalResistorCalibrator::fit(const float* r_ref, const float*
         m.correction = optimize_correction_sweep(r_ref, v_diff, n, v_gpio_open, m.r1_r2);
     }
     return m;
+}
+
+// Sum of squared relative resistance errors; a point without a solution costs as much as 1000 % off
+double EmpiricalResistorCalibrator::resistanceCost(const EmpiricalModel& m, const float* r_ref, const float* v_diff,
+                                                   int n) {
+    double sum = 0.0;
+    for (int i = 0; i < n; i++) {
+        float r_est = modelResistance(m, v_diff[i]);
+        double e = r_est > 0 ? (r_est - r_ref[i]) / r_ref[i] : 10.0;
+        sum += e * e;
+    }
+    return sum;
+}
+
+// Least squares on the relative resistance error over (R1_R2, Correction), V_gpio fixed.
+// Nelder-Mead simplex started from the voltage fit; never returns a worse model than that.
+EmpiricalModel EmpiricalResistorCalibrator::fit(const float* r_ref, const float* v_diff, int n, float v_gpio_open) {
+    EmpiricalModel start = fitVoltage(r_ref, v_diff, n, v_gpio_open);
+    auto cost = [&](double r1_r2, double correction) {
+        EmpiricalModel m = {v_gpio_open, (float)r1_r2, (float)correction};
+        return resistanceCost(m, r_ref, v_diff, n);
+    };
+
+    // Simplex of 3 points in (R1_R2, Correction)
+    double x[3][2] = {{start.r1_r2, start.correction},
+                      {start.r1_r2 + 2.0, start.correction},
+                      {start.r1_r2, start.correction + 2.0}};
+    double f[3];
+    for (int i = 0; i < 3; i++) {
+        f[i] = cost(x[i][0], x[i][1]);
+    }
+    for (int iter = 0; iter < 500; iter++) {
+        // order: x[0] best, x[2] worst
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 2 - i; j++) {
+                if (f[j] > f[j + 1]) {
+                    double tf = f[j];
+                    f[j] = f[j + 1];
+                    f[j + 1] = tf;
+                    for (int k = 0; k < 2; k++) {
+                        double t = x[j][k];
+                        x[j][k] = x[j + 1][k];
+                        x[j + 1][k] = t;
+                    }
+                }
+            }
+        }
+        if (f[2] - f[0] < 1e-12) {
+            break;
+        }
+        double c[2], xr[2], xe[2], xc[2];
+        for (int k = 0; k < 2; k++) {
+            c[k] = (x[0][k] + x[1][k]) / 2.0;
+            xr[k] = c[k] + (c[k] - x[2][k]);
+        }
+        double fr = cost(xr[0], xr[1]);
+        if (fr < f[0]) {
+            for (int k = 0; k < 2; k++) {
+                xe[k] = c[k] + 2.0 * (c[k] - x[2][k]);
+            }
+            double fe = cost(xe[0], xe[1]);
+            const double* best = fe < fr ? xe : xr;
+            x[2][0] = best[0];
+            x[2][1] = best[1];
+            f[2] = fe < fr ? fe : fr;
+        } else if (fr < f[1]) {
+            x[2][0] = xr[0];
+            x[2][1] = xr[1];
+            f[2] = fr;
+        } else {
+            for (int k = 0; k < 2; k++) {
+                xc[k] = c[k] + 0.5 * (x[2][k] - c[k]);
+            }
+            double fc = cost(xc[0], xc[1]);
+            if (fc < f[2]) {
+                x[2][0] = xc[0];
+                x[2][1] = xc[1];
+                f[2] = fc;
+            } else {  // shrink towards the best point
+                for (int i = 1; i < 3; i++) {
+                    for (int k = 0; k < 2; k++) {
+                        x[i][k] = x[0][k] + 0.5 * (x[i][k] - x[0][k]);
+                    }
+                    f[i] = cost(x[i][0], x[i][1]);
+                }
+            }
+        }
+    }
+    int best = 0;
+    for (int i = 1; i < 3; i++) {
+        if (f[i] < f[best]) {
+            best = i;
+        }
+    }
+    if (f[best] >= cost(start.r1_r2, start.correction)) {
+        return start;
+    }
+    return {v_gpio_open, (float)x[best][0], (float)x[best][1]};
 }
 
 CalEvaluation EmpiricalResistorCalibrator::evaluate(const EmpiricalModel& m, const float* r_ref, const float* v_diff,
