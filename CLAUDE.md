@@ -10,12 +10,28 @@ architecture.
 
 6 terminals, wired to differential ADC measurement pairs:
 
-- Bottom face sockets: **A, B, C** (right side in code: `Ar`, `Br`, `Cr`) — body
-  cord plug from the cable reel side.
-- Top face sockets: **A, B, C** + a 3mm socket (left side in code: `Al`, `Bl`,
-  `Cl`) — body cord plug from the weapon side. `Al`/piste is also used for the
-  M5 cap nut reference contact and reel-mode loop.
+- Bottom face sockets — body cord plug from the cable reel side; right side in
+  code (`Ar`, `Br`, `Cr`).
+- Top face sockets + a 3mm socket — body cord plug from the weapon side; left
+  side in code (`Al`, `Bl`, `Cl`). `Al`/piste is also used for the M5 cap nut
+  reference contact and reel-mode loop.
 - `Terminal` enum (`WireMeasurement.h`): `Ar=0, Br=1, Cr=2, Al=3, Bl=4, Cl=5`.
+
+**Code terminal letters are not the socket letters printed on the tester.** The
+code follows the maintainer's internal order C-A-B; the FIE letters (README,
+anything an operator reads) are A-B-C in the same positions:
+
+| Code terminal | Physical socket (FIE) |
+|---|---|
+| `C` (`Cr`, `Cl`, `cr_*`, `cl_*`) | **A** |
+| `A` (`Ar`, `Al`, `ar_*`, `al_*`) | **B** |
+| `B` (`Br`, `Bl`, `br_*`, `bl_*`) | **C** |
+
+E.g. the calibration path `Cl-Cr` is socket A top to socket A bottom, and the
+reel-mode short `Al-Bl` (measured on the `cl`/`piste` channels) is sockets A+B
+on top. On the plug, A–B are 15 mm apart and B–C 20 mm. Text or drawings shown
+to the operator must use the physical letters; `CalibrationPath::socket`
+(`src/CalibrationPaths.h`) carries them for calibration.
 
 Pin/ADC-channel mapping is in `src/Hardware.h`. The device measures resistance
 between arbitrary terminal pairs via analog switching (`IODirection_*` /
@@ -44,8 +60,26 @@ Recently refactored (`refactor/measurement-architecture` branch, merged into
 - **`adc_calibrator.h/.cpp`** (`EmpiricalResistorCalibrator`) — converts raw mV
   readings to Ohms (`get_resistance_empirical`) and Ohm thresholds to mV
   (`get_mv_threshold`), using an empirically fitted model (`v_gpio`, `r1_r2`,
-  `correction`) from interactive calibration against known resistors. Persists
-  to NVS.
+  `correction`). Pure model maths (`fit`, `evaluate`, `modelResistance`) plus
+  `measure(path)`; verdict per point ≤ 2 % excellent, ≤ 5 % pass, else fail.
+
+## Calibration over Wi-Fi
+
+See `docs/CALIBRATION_API.md`. The tester serves a step-by-step wizard at
+`/calibrate` (source `web/calibrate.html`; `extra_script.py` gzips it into the
+generated `src/calibrate_html.h` on every build — edit the HTML, never the
+header). Resistor sets and run history live in the operator's browser.
+
+- **`CalibrationPaths.h`** — measurable paths: `Cl-Cr` (default, = socket A,
+  the model used for all thresholds) and `Bl-Br` (= socket C, what the old
+  serial calibration measured).
+- **`CalibrationStore`** — NVS `cal_store`: model per path + previous (undo),
+  ring of 6 run records; migrates the legacy `emp_cal` once.
+- **`CalibrationService`** — `/api/cal/*` handlers (async_tcp task) only
+  request; the tester task's `Calibrating` state owns the hardware, samples
+  continuously, applies saved models, mirrors progress on the LED matrix and
+  ends after 5 min without API calls. Wi-Fi is locked on during a session.
+- **`tools/cal_wizard.py`** — same flow from a terminal (Python stdlib).
 
 `TesterConfig.h/.cpp` exist but are currently empty — not part of the active
 build.
@@ -54,7 +88,9 @@ build.
 
 Runs in its own FreeRTOS task (`taskLoop`, pinned to core 1). Core states
 (`State_t`): `Waiting`, `EpeeTesting`, `FoilTesting`, `LameTesting`,
-`WireTesting_1`, `WireTesting_2`, `ReelTesting` (some special modes run as a
+`WireTesting_1`, `WireTesting_2`, `ReelTesting`, `Calibrating` (web
+calibration session; entered from any state at the top of `taskLoop` when
+requested) (some special modes run as a
 blocking sub-loop called directly from `Waiting` rather than as a distinct
 `currentState`).
 
@@ -62,6 +98,8 @@ blocking sub-loop called directly from `Waiting` rather than as a distinct
 measurements and checks fixed mV thresholds (not yet resistance-calibrated —
 these are rough "is something plugged in this way" detectors) to decide which
 special test to enter:
+
+Pairs below use code terminal names (see the mapping table above).
 
 | Trigger (in `Waiting`) | Enters |
 |---|---|
@@ -72,9 +110,9 @@ special test to enter:
 | `Al-Bl < Ohm_50` | Cable reel test (`doReelTest`) — only reachable once `ReelMode` is armed |
 
 Cable Reel mode is armed/disarmed by short-circuiting top sockets A+B
-(`Ar-Br`... actually gated via `SetWiretestMode(true)` from `doReelTest`, and
-toggled off when `Al-Bl` measurement drops below `Ohm_50` while already in
-`ReelMode`, per README's "short A+B again to exit").
+(physical letters; code `Al-Bl`): `doReelTest` calls `SetWiretestMode(true)`,
+and it toggles off when the `Al-Bl` measurement drops below `Ohm_50` while
+already in `ReelMode` (README: "short A+B again to exit").
 
 If no special-mode trigger fires and a body cord is detected across the 3x3
 matrix (`MeasurementAnalysis::isWirePluggedIn`), the state machine moves into

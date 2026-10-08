@@ -6,3 +6,5 @@
 .vscode/ipch
 /version.h
 OTAbuilds/
+# Calibration run records written by tools/cal_wizard.py (personal measurement data)
+cal_runs.jsonl
