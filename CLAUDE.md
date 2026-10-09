@@ -38,10 +38,9 @@ between arbitrary terminal pairs via analog switching (`IODirection_*` /
 `IOValues_*` macros select which two terminals are connected through the
 measurement bridge).
 
-## Measurement layer (post-refactor architecture)
+## Measurement layer
 
-Recently refactored (`refactor/measurement-architecture` branch, merged into
-`main`) into clean layers:
+The measurement code is split into layers:
 
 - **`MeasurementHardware`** — lowest level, talks to the ADC/switching hardware.
   `getDifferentialSample` is bidirectional: half the samples with the drive set
