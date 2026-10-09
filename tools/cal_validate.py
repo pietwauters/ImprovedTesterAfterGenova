@@ -16,8 +16,10 @@ Connect to the "Tester" Wi-Fi, then:
     python3 tools/cal_validate.py --priority 3     # all 15 connections
     python3 tools/cal_validate.py --paths Al-Ar,Bl-Br
     python3 tools/cal_validate.py --list
+    python3 tools/cal_validate.py -r 3.26 --set-name single --priority 3   # one resistor, all connections
 
-Resistor sets are shared with cal_wizard.py (-r / --set-name). Each resistor is
+Resistor sets are shared with cal_wizard.py (-r / --set-name). With 1 to 3 resistors only the tester's
+reading is reported (an own model needs at least 4). Each resistor is
 connected twice to check the contacts. Results are appended to cal_runs.jsonl
 (kind "validate"); tools/cal_analyze.py summarises them.
 """
@@ -185,20 +187,28 @@ def measure_connection(tester, info, path, set_name, resistors, prompt):
                     s.get("v_top_rev_mv", 0), s.get("v_diff_rev_mv", 0)])
         contact.append(c)
 
-    fit = tester.post("/api/cal/fit", {"path": path, "open": {"v_high_mv": v_high}, "points": points})
-    active, own = info["active_model"], fit["model"]
-    print(f"\n  {'R ref':>7}  {'tester reads':>12}  {'error':>8}   {'own model error':>15}")
-    act_err, own_err = [], []
+    active = info["active_model"]
+    own = None
+    if len(points) >= 4:  # an own model needs 4 points
+        own = tester.post("/api/cal/fit", {"path": path, "open": {"v_high_mv": v_high}, "points": points})["model"]
+    print(f"\n  {'R ref':>7}  {'tester reads':>12}  {'difference':>11}  {'error':>8}" + ("   own model error" if own else ""))
+    act_err, own_err, diffs = [], [], []
     for p in points:
         est, e = signed_error(active, p["r_ohm"], p["v_diff_mv"])
-        _, eo = signed_error(own, p["r_ohm"], p["v_diff_mv"])
         act_err.append(e)
-        own_err.append(eo)
-        print(f"  {p['r_ohm']:7.3f}  {est:10.3f} Ohm  {e:+7.2f} %   {eo:+13.2f} %")
+        diffs.append(est - p["r_ohm"])
+        line = f"  {p['r_ohm']:7.3f}  {est:8.3f} Ohm  {(est - p['r_ohm']) * 1000:+7.0f} mOhm  {e:+7.2f} %"
+        if own:
+            _, eo = signed_error(own, p["r_ohm"], p["v_diff_mv"])
+            own_err.append(eo)
+            line += f"   {eo:+13.2f} %"
+        print(line)
     worst_act = max(act_err, key=abs)
     rms_act = math.sqrt(sum(e * e for e in act_err) / len(act_err))
-    worst_own = max(map(abs, own_err))
-    print(f"  Tester's model: worst {worst_act:+.2f} %, RMS {rms_act:.2f} %.  Own model: worst {worst_own:.2f} %.")
+    worst_own = max(map(abs, own_err)) if own else None
+    mean_diff = sum(diffs) / len(diffs)
+    print(f"  Tester's model: worst {worst_act:+.2f} %, RMS {rms_act:.2f} %, mean difference {mean_diff * 1000:+.0f} mOhm."
+          + (f"  Own model: worst {worst_own:.2f} %." if own else ""))
 
     run_id = int(time.time())
     record = {
@@ -213,9 +223,10 @@ def measure_connection(tester, info, path, set_name, resistors, prompt):
         "model": "m2s" if "r_internal_ohm" in active else "m0",
         "active": [active["v_gpio_mv"], active["r1_r2_ohm"], active.get("r_internal_ohm", active.get("correction_ohm2"))]
                   + ([active.get("driver_slope_ohm_per_a", 0)] if "r_internal_ohm" in active else []),
-        "own": [own["v_gpio_mv"], own["r1_r2_ohm"], own.get("r_internal_ohm", own.get("correction_ohm2"))]
-               + ([own.get("driver_slope_ohm_per_a", 0)] if "r_internal_ohm" in own else []),
-        "result": {"active_worst": round(worst_act, 3), "active_rms": round(rms_act, 3), "own_worst": round(worst_own, 3)},
+        "own": ([own["v_gpio_mv"], own["r1_r2_ohm"], own.get("r_internal_ohm", own.get("correction_ohm2"))]
+                + ([own.get("driver_slope_ohm_per_a", 0)] if "r_internal_ohm" in own else [])) if own else None,
+        "result": {"active_worst": round(worst_act, 3), "active_rms": round(rms_act, 3),
+                   "own_worst": round(worst_own, 3) if own else None, "mean_diff_ohm": round(mean_diff, 4)},
     }
     return record
 
@@ -244,8 +255,8 @@ def main():
             values = [float(v) for v in args.resistors.split(",")]
         except ValueError:
             raise SystemExit("Resistor values must be numbers, e.g. -r 1,2.2,4.7,10")
-        if not 4 <= len(values) <= 8 or min(values) <= 0:
-            raise SystemExit("Give 4 to 8 positive resistor values.")
+        if not 1 <= len(values) <= 8 or min(values) <= 0:
+            raise SystemExit("Give 1 to 8 positive resistor values.")
     set_name, resistors = cw.choose_resistors(args)
     resistors = sorted(resistors)
     print(f"Resistors ({set_name}): {', '.join(f'{v:g}' for v in resistors)} Ohm")
@@ -290,11 +301,13 @@ def main():
 
     if results:
         print(f"\nSummary ({len(results)} connections, recorded in {args.runs_file}):")
-        print(f"  {'path':6s}  {'connection':22s}  {'tester model worst':>18}  {'RMS':>6}  {'own model worst':>15}  use")
+        print(f"  {'path':6s}  {'connection':22s}  {'tester model worst':>18}  {'RMS':>6}  {'difference':>11}  {'own model':>9}  use")
         for rec in results:
             res = rec["result"]
             print(f"  {rec['path']:6s}  {rec['ends'][0] + ' - ' + rec['ends'][1]:22s}  {res['active_worst']:+16.2f} %"
-                  f"  {res['active_rms']:4.2f} %  {res['own_worst']:13.2f} %  {rec['use']}")
+                  f"  {res['active_rms']:4.2f} %  {res['mean_diff_ohm'] * 1000:+6.0f} mOhm  "
+                  + (f"{res['own_worst']:7.2f} %" if res["own_worst"] is not None else "        –")
+                  + f"  {rec['use']}")
     print("The tester is back in normal mode.")
 
 

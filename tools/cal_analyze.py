@@ -209,17 +209,19 @@ def report_validations(runs):
     for run in runs:
         R = [p[0] for p in run["pts"]]
         V = [p[3] / 1000 for p in run["pts"]]  # bidirectional average
-        a, o = run["active"], run["own"]
+        a, o = run["active"], run.get("own")
         if run.get("model") in ("m2", "m2s"):
             e = m2_errors((a[0] / 1000, *a[1:]), R, V)
-            own = m2_errors((o[0] / 1000, *o[1:]), R, V)
+            own = m2_errors((o[0] / 1000, *o[1:]), R, V) if o else None
         else:  # older records: the Rs + c/R model the tester used then
             e = errors((a[0] / 1000, a[1], a[2]), R, V)
-            own = errors((o[0] / 1000, o[1], o[2]), R, V)
+            own = errors((o[0] / 1000, o[1], o[2]), R, V) if o else None
+        diff = sum(ei * max(r, 1.0) / 100 for ei, r in zip(e, R)) / len(R)  # mean difference in Ohm
         ends = " - ".join(run.get("ends", ["?", "?"]))
         name = f" '{run['name']}'" if run.get("name") else ""
+        own_text = f"own model worst {max(map(abs, own)):4.2f} %" if own else "own model    –  "
         print(f"  {run.get('mac', '')[-5:]}{name} {run['path']:6s} {ends:20s} worst {max(e, key=abs):+6.2f} %  "
-              f"rms {math.sqrt(sum(x * x for x in e) / len(e)):4.2f} %  own model worst {max(map(abs, own)):4.2f} %  "
+              f"rms {math.sqrt(sum(x * x for x in e) / len(e)):4.2f} %  difference {diff * 1000:+5.0f} mOhm  {own_text}  "
               f"errors " + " ".join(f"{x:+6.2f}" for x in e) + f"   ({run.get('use', '')})")
 
 
