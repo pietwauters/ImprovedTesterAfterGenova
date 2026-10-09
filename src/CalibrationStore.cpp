@@ -83,6 +83,52 @@ bool CalibrationStore::writeModel(const char* key, const StoredModel& m) {
     return err == ESP_OK;
 }
 
+struct StoredCorrection {
+    uint16_t version;
+    uint16_t reserved;
+    float scale;
+    float offset_ohm;
+    uint32_t runId;
+};
+static constexpr uint16_t kStoredCorrectionVersion = 1;
+
+bool CalibrationStore::saveCorrection(const CalibrationPath& path, const PathCorrection& c, uint32_t runId) {
+    char key[16];
+    modelKey(key, sizeof(key), 'k', path);
+    nvs_handle_t handle;
+    if (nvs_open(kNamespace, NVS_READWRITE, &handle) != ESP_OK) {
+        return false;
+    }
+    StoredCorrection sc = {kStoredCorrectionVersion, 0, c.scale, c.offset_ohm, runId};
+    esp_err_t err = nvs_set_blob(handle, key, &sc, sizeof(sc));
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    if (err == ESP_OK) {
+        printf("Correction saved for path %s: scale %.4f, offset %+.4f Ohm\n", path.name, c.scale, c.offset_ohm);
+    }
+    return err == ESP_OK;
+}
+
+bool CalibrationStore::loadCorrection(const CalibrationPath& path, PathCorrection& out) const {
+    char key[16];
+    modelKey(key, sizeof(key), 'k', path);
+    nvs_handle_t handle;
+    if (nvs_open(kNamespace, NVS_READONLY, &handle) != ESP_OK) {
+        return false;
+    }
+    StoredCorrection sc;
+    size_t size = sizeof(sc);
+    esp_err_t err = nvs_get_blob(handle, key, &sc, &size);
+    nvs_close(handle);
+    if (err != ESP_OK || size != sizeof(sc) || sc.version != kStoredCorrectionVersion || sc.scale <= 0) {
+        return false;
+    }
+    out = {sc.scale, sc.offset_ohm};
+    return true;
+}
+
 bool CalibrationStore::load(const CalibrationPath& path, StoredModel& out) const {
     char key[16];
     modelKey(key, sizeof(key), 'm', path);

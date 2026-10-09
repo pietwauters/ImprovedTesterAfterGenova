@@ -138,6 +138,9 @@ EmpiricalModel CalibrationService::activeModel() {
 
 void CalibrationService::setLastFit(const CalibrationPath& path, const EmpiricalModel& m, CalVerdict verdict) {
     lock();
+    for (int i = 0; i < kNumCalibrationPaths; i++) {
+        pendingCorr_[i] = false;  // corrections were relative to the previous fit
+    }
     fitValid_ = true;
     fitPath_ = &path;
     fitModel_ = m;
@@ -159,6 +162,43 @@ void CalibrationService::clearLastFit() {
     lock();
     fitValid_ = false;
     unlock();
+}
+
+void CalibrationService::setPendingCorrection(int pathIndex, const PathCorrection& c) {
+    lock();
+    pendingCorr_[pathIndex] = true;
+    pendingCorrVal_[pathIndex] = c;
+    unlock();
+}
+
+bool CalibrationService::pendingCorrection(int pathIndex, PathCorrection& c) {
+    lock();
+    bool p = pendingCorr_[pathIndex];
+    c = pendingCorrVal_[pathIndex];
+    unlock();
+    return p;
+}
+
+void CalibrationService::queueCorrection(int pathIndex, const PathCorrection& c) {
+    lock();
+    queuedCorr_[pathIndex] = true;
+    queuedCorrVal_[pathIndex] = c;
+    unlock();
+}
+
+bool CalibrationService::takeQueuedCorrection(int& pathIndex, PathCorrection& c) {
+    lock();
+    for (int i = 0; i < kNumCalibrationPaths; i++) {
+        if (queuedCorr_[i]) {
+            queuedCorr_[i] = false;
+            pathIndex = i;
+            c = queuedCorrVal_[i];
+            unlock();
+            return true;
+        }
+    }
+    unlock();
+    return false;
 }
 
 void CalibrationService::queueModel(const EmpiricalModel& m) {
@@ -481,14 +521,115 @@ static void handleSave(AsyncWebServerRequest* request, cJSON* body) {
         sendError(request, 500, "NVS write failed");
         return;
     }
-    calibrationService.clearLastFit();
     if (path == &kDefaultCalibrationPath) {
         calibrationService.queueModel(m);  // the tester uses the default path's model
     }
+    // Corrections measured against this fit (B-B, C-C) are saved with it
     cJSON* obj = cJSON_CreateObject();
+    cJSON* saved = cJSON_AddArrayToObject(obj, "corrections_saved");
+    for (int i = 0; i < kNumCalibrationPaths; i++) {
+        PathCorrection c;
+        if (path == &kDefaultCalibrationPath && calibrationService.pendingCorrection(i, c) &&
+            calibrationStore.saveCorrection(kCalibrationPaths[i], c, runId)) {
+            calibrationService.queueCorrection(i, c);
+            cJSON_AddItemToArray(saved, cJSON_CreateString(kCalibrationPaths[i].name));
+        }
+    }
+    calibrationService.clearLastFit();
     cJSON_AddBoolToObject(obj, "saved", true);
     cJSON_AddStringToObject(obj, "path", path->name);
     cJSON_AddItemToObject(obj, "model", modelToJson(m));
+    sendJson(request, 200, obj);
+}
+
+// Correction of a connection relative to the A-A model: R = scale * R(A-A) + offset, fitted on the
+// session's points for that connection (weighted like the calibration, 2 points or more). Uses the
+// A-A fit of this session if there is one, else the active model. Saved by /save with the fit.
+static void handleCorrection(AsyncWebServerRequest* request, cJSON* body) {
+    if (body == nullptr) {
+        sendError(request, 400, "body required");
+        return;
+    }
+    const CalibrationPath* path = pathFromRequest(request, body);
+    if (path == nullptr) {
+        return;
+    }
+    if (path == &kDefaultCalibrationPath) {
+        sendError(request, 400, "the calibrated connection needs no correction");
+        return;
+    }
+    const CalibrationPath* fitPath;
+    EmpiricalModel model;
+    CalVerdict verdict;
+    if (!calibrationService.lastFit(fitPath, model, verdict) || fitPath != &kDefaultCalibrationPath) {
+        model = calibrationService.activeModel();
+    }
+    cJSON* points = cJSON_GetObjectItemCaseSensitive(body, "points");
+    int n = cJSON_GetArraySize(points);
+    if (!cJSON_IsArray(points) || n < 2 || n > CalMaxPoints) {
+        sendError(request, 400, "points: 2 to 8 required");
+        return;
+    }
+    float r_ref[CalMaxPoints], r_aa[CalMaxPoints];
+    double sw = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+    int i = 0;
+    cJSON* point;
+    cJSON_ArrayForEach(point, points) {
+        cJSON* r = cJSON_GetObjectItemCaseSensitive(point, "r_ohm");
+        cJSON* v = cJSON_GetObjectItemCaseSensitive(point, "v_diff_mv");
+        if (!cJSON_IsNumber(r) || !cJSON_IsNumber(v) || r->valuedouble <= 0 || v->valuedouble <= 0) {
+            sendError(request, 400, "each point needs r_ohm > 0 and v_diff_mv > 0");
+            return;
+        }
+        r_ref[i] = (float)r->valuedouble;
+        r_aa[i] = EmpiricalResistorCalibrator::modelResistance(model, (float)v->valuedouble / 1000.0f);
+        if (r_aa[i] < 0) {
+            sendError(request, 422, "a point reads open");
+            return;
+        }
+        double w = 1.0 / fmax(r_ref[i], 1.0) / fmax(r_ref[i], 1.0);  // error relative to max(R, 1 Ohm)
+        sw += w;
+        sx += w * r_aa[i];
+        sy += w * r_ref[i];
+        sxx += w * r_aa[i] * r_aa[i];
+        sxy += w * r_aa[i] * r_ref[i];
+        i++;
+    }
+    double det = sw * sxx - sx * sx;
+    if (fabs(det) < 1e-9) {
+        sendError(request, 400, "needs at least two different resistors");
+        return;
+    }
+    PathCorrection c = {(float)((sw * sxy - sx * sy) / det), 0.0f};
+    c.offset_ohm = (float)((sy - c.scale * sx) / sw);
+    if (c.scale < 0.9f || c.scale > 1.1f || fabsf(c.offset_ohm) > 0.5f) {
+        sendError(request, 422, "correction out of range (scale 0.9-1.1, offset within 0.5 Ohm): check the connection");
+        return;
+    }
+    int idx = calibrationPathIndex(*path);
+    PathCorrection table = defaultPathCorrection(idx);
+    calibrationService.setPendingCorrection(idx, c);
+
+    // How far the table is from this tester: at 1 Ohm and per point
+    float aa1 = (1.0f - c.offset_ohm) / c.scale;
+    float dev1 = table.scale * aa1 + table.offset_ohm - 1.0f;
+    cJSON* obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(obj, "path", path->name);
+    addRounded(obj, "scale", c.scale, 5);
+    addRounded(obj, "offset_ohm", c.offset_ohm, 4);
+    cJSON* t = cJSON_AddObjectToObject(obj, "table");
+    addRounded(t, "scale", table.scale, 5);
+    addRounded(t, "offset_ohm", table.offset_ohm, 4);
+    addRounded(obj, "table_deviation_at_1_ohm_mohm", dev1 * 1000.0f, 1);
+    cJSON* out = cJSON_AddArrayToObject(obj, "points");
+    for (int k = 0; k < n; k++) {
+        cJSON* p = cJSON_CreateObject();
+        addRounded(p, "r_ohm", r_ref[k], 4);
+        addRounded(p, "r_aa_ohm", r_aa[k], 4);
+        addRounded(p, "r_table_ohm", table.scale * r_aa[k] + table.offset_ohm, 4);
+        addRounded(p, "r_own_ohm", c.scale * r_aa[k] + c.offset_ohm, 4);
+        cJSON_AddItemToArray(out, p);
+    }
     sendJson(request, 200, obj);
 }
 
@@ -585,6 +726,16 @@ static void handleInfo(AsyncWebServerRequest* request, const String& deviceName)
         addModelInfo(models, p);
     }
     cJSON_AddItemToObject(obj, "active_model", modelToJson(calibrationService.activeModel()));
+    // Correction per connection relative to the A-A model: the tester's own where measured, else the table
+    cJSON* corr = cJSON_AddObjectToObject(obj, "corrections");
+    for (int i = 0; i < kNumCalibrationPaths; i++) {
+        PathCorrection c = defaultPathCorrection(i);
+        bool own = calibrationStore.loadCorrection(kCalibrationPaths[i], c);
+        cJSON* e = cJSON_AddObjectToObject(corr, kCalibrationPaths[i].name);
+        addRounded(e, "scale", c.scale, 5);
+        addRounded(e, "offset_ohm", c.offset_ohm, 4);
+        cJSON_AddBoolToObject(e, "own", own);
+    }
     cJSON_AddItemToObject(obj, "factory_model", modelToJson(EmpiricalResistorCalibrator::factoryModel()));
     cJSON_AddNumberToObject(obj, "runs", calibrationStore.runCount());
     cJSON_AddNumberToObject(obj, "max_runs", CalibrationStore::MaxRuns);
@@ -660,6 +811,7 @@ void registerCalibrationApi(AsyncWebServer& server, const String& deviceName) {
     onPostJson(server, "/api/cal/fit", handleFit);
     onPostJson(server, "/api/cal/save", handleSave);
     onPostJson(server, "/api/cal/undo", handleUndo);
+    onPostJson(server, "/api/cal/correction", handleCorrection);
 
     server.on(
         "/api/cal/run", HTTP_POST,

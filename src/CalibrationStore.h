@@ -48,6 +48,11 @@ class CalibrationStore {
     // Swap the current and previous model of a path; returns the model now active
     bool undo(const CalibrationPath& path, StoredModel& restored);
 
+    // A tester's own correction for a connection (replaces the table value), stored with the run that
+    // measured it
+    bool saveCorrection(const CalibrationPath& path, const PathCorrection& c, uint32_t runId);
+    bool loadCorrection(const CalibrationPath& path, PathCorrection& out) const;
+
     // Run records are compact JSON objects with an "id" member; the oldest is dropped when full
     bool addRun(const char* json, String& error);
     int runCount() const;

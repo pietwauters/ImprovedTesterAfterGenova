@@ -204,6 +204,13 @@ void Tester::begin(bool ForceCalibration) {
         DefaultBlinkColor = LedPanel->m_Green;
     }
     calibrationService.setActiveModel(mycalibrator.model());
+    // The tester's own corrections (B-B, C-C from a calibration) replace the table values
+    for (int i = 0; i < kNumCalibrationPaths; i++) {
+        PathCorrection c;
+        if (calibrationStore.loadCorrection(kCalibrationPaths[i], c)) {
+            mycalibrator.setCorrection(i, c);
+        }
+    }
     LedPanel->SetBlinkColor(DefaultBlinkColor);
     AverageLeadResistance = rtc.retrieve("LeadR", 0.0f);
 
@@ -299,15 +306,24 @@ void Tester::taskLoop() {
 
 // A model saved or restored over the web API: use it for all thresholds
 void Tester::applyQueuedModel() {
-    EmpiricalModel m;
-    if (!calibrationService.takeQueuedModel(m)) {
-        return;
+    bool changed = false;
+    int pathIndex;
+    PathCorrection c;
+    while (calibrationService.takeQueuedCorrection(pathIndex, c)) {
+        mycalibrator.setCorrection(pathIndex, c);
+        changed = true;
     }
-    mycalibrator.setModel(m);
-    calibrationService.setActiveModel(m);
-    UpdateThresholdsWithLeadResistance(0.0);
-    SetWiretestMode(false);
-    DefaultBlinkColor = LedPanel->m_Green;
+    EmpiricalModel m;
+    if (calibrationService.takeQueuedModel(m)) {
+        mycalibrator.setModel(m);
+        calibrationService.setActiveModel(m);
+        DefaultBlinkColor = LedPanel->m_Green;
+        changed = true;
+    }
+    if (changed) {
+        UpdateThresholdsWithLeadResistance(0.0);
+        SetWiretestMode(false);
+    }
 }
 
 void Tester::enterCalibratingState() {

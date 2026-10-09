@@ -65,6 +65,10 @@ class CalibrationService {
     bool lastFit(const CalibrationPath*& path, EmpiricalModel& m, CalVerdict& verdict);
     void clearLastFit();
     void queueModel(const EmpiricalModel& m);  // tester task applies it
+    // Corrections measured in this session, saved together with the A-A fit (cleared by a new fit)
+    void setPendingCorrection(int pathIndex, const PathCorrection& c);
+    bool pendingCorrection(int pathIndex, PathCorrection& c);
+    void queueCorrection(int pathIndex, const PathCorrection& c);  // tester task applies it
     void setFeedback(CalFeedback f);
 
     // --- tester task side ---
@@ -73,6 +77,7 @@ class CalibrationService {
     // Dropped when the path changed while it was being measured
     void pushReading(const CalibrationPath& path, const EmpiricalResistorCalibrator::EmpiricalReading& r);
     bool takeQueuedModel(EmpiricalModel& m);
+    bool takeQueuedCorrection(int& pathIndex, PathCorrection& c);
     CalFeedback takeFeedback();
     bool idleTimedOut();
 
@@ -103,6 +108,10 @@ class CalibrationService {
 
     bool queued_ = false;
     EmpiricalModel queuedModel_;
+    bool pendingCorr_[kNumCalibrationPaths] = {};
+    PathCorrection pendingCorrVal_[kNumCalibrationPaths];
+    bool queuedCorr_[kNumCalibrationPaths] = {};
+    PathCorrection queuedCorrVal_[kNumCalibrationPaths];
 
     void lock() { xSemaphoreTake(mutex_, portMAX_DELAY); }
     void unlock() { xSemaphoreGive(mutex_); }

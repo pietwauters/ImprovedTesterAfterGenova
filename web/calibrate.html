@@ -148,6 +148,7 @@ details { margin-top: 12px; } summary { cursor: pointer; color: var(--accent); }
         <thead><tr><th>Resistor</th><th>Tester reads</th><th>Error</th></tr></thead>
         <tbody id="result-rows"></tbody>
       </table>
+      <div id="extra-result"></div>
       <details><summary>Details</summary>
         <table style="margin-top:8px">
           <thead><tr><th>Model</th><th>Worst error</th><th>RMS</th></tr></thead>
@@ -435,6 +436,19 @@ function renderStepChips() {
     '<span class="chip ' + (i < n ? "done" : i === n ? "now" : "") + '">' + (i < n ? "✓ " : "") + nice(v) + " Ω</span>").join("");
 }
 
+// The two resistors of the set closest to 1 Ohm and to 4 Ohm (different ones), for B-B and C-C
+function pickExtraResistors(values) {
+  const near = t => values.reduce((a, b) => Math.abs(b - t) < Math.abs(a - t) ? b : a);
+  const low = near(1), high = near(4);
+  return low === high ? [low] : [low, high];
+}
+
+function renderExtraChips(path, letter) {
+  const done = session.extra[path].points.length;
+  $("step-chips").innerHTML = '<span class="chip">Socket ' + letter + '</span>' + session.extraR.map((v, i) =>
+    '<span class="chip ' + (i < done ? "done" : i === done ? "now" : "") + '">' + (i < done ? "✓ " : "") + nice(v) + " Ω</span>").join("");
+}
+
 // Series resistance of a plain divider, estimated from this run's points: R = Rs * V / (Vg - V)
 function estimateR(vDiff) {
   const vg = session.open.v_top_mv;
@@ -486,16 +500,17 @@ async function waitOpen(text) {
   });
 }
 
-async function captureResistor(i, total) {
-  const r = session.set.values[i];
-  const where = "Between socket " + session.letter + " on top and socket " + session.letter + " on the bottom.";
+// Capture resistor r (with the contact check) on the current connection; letter = its socket, top and
+// bottom. The accepted reading goes into sink = { points, raw, contact } (the A-A run, or B-B / C-C).
+async function captureResistor(r, stepNo, total, letter, sink, chips) {
+  const where = "Between socket " + letter + " on top and socket " + letter + " on the bottom.";
   const caps = [];
   let note = "";
   for (;;) {
     const again = caps.length > 0;
-    stepView(i + 2, total, again ? "Connect the " + nice(r) + " Ω resistor again" : "Connect the " + nice(r) + " Ω resistor",
+    stepView(stepNo, total, again ? "Connect the " + nice(r) + " Ω resistor again" : "Connect the " + nice(r) + " Ω resistor",
       note || (again ? "Contact check: a second reading must match the first. Seat it firmly." : where + " Keep it still until it is captured."), true);
-    renderStepChips();
+    chips();
     const s = await waitFor(x => !x.open, (x, holds, fresh) => {
       if (x.open) setReading("Open", "Waiting for the resistor…", 0);
       else setReading(x.v_diff_mv.toFixed(1) + " mV", x.stable && holds ? "Stable" : "Settling…", fresh);
@@ -507,7 +522,7 @@ async function captureResistor(i, total) {
         if (guess !== r && Math.abs(est - r) / r > 0.15) {
           setReading(s.v_diff_mv.toFixed(1) + " mV", "Check the resistor", 1);
           if (await askWrong(r, guess) === "again") {
-            stepView(i + 2, total, "Remove the resistor", "Then connect the " + nice(r) + " Ω resistor again.", true);
+            stepView(stepNo, total, "Remove the resistor", "Then connect the " + nice(r) + " Ω resistor again.", true);
             await waitOpen("Remove the resistor");
             continue;
           }
@@ -535,14 +550,15 @@ async function captureResistor(i, total) {
     // Accept: the mean of the two closest captures
     const a = pair.a, b = pair.b;
     const v = mean2(a, b, "v_diff_mv");
-    session.points.push({ r_ohm: r, v_diff_mv: v });
-    // [r, v_top, v_bottom, v_diff, noise sd, reversed v_top, reversed v_diff] (mV)
+    sink.points.push({ r_ohm: r, v_diff_mv: v });
+    // [r, v_top, v_bottom, v_diff, noise sd, reversed v_top, reversed v_diff] (mV, 0.01 mV)
     const rev = mean2(a, b, "v_diff_rev_mv");
-    session.raw.push(rev !== undefined
+    const row = rev !== undefined
       ? [r, mean2(a, b, "v_top_mv"), mean2(a, b, "v_bottom_mv"), v, Math.max(a.noise_sd_mv, b.noise_sd_mv), mean2(a, b, "v_top_rev_mv"), rev]
-      : [r, mean2(a, b, "v_top_mv"), mean2(a, b, "v_bottom_mv"), v, Math.max(a.noise_sd_mv, b.noise_sd_mv)]);
-    session.contact.push([caps.length, +fmt(pair.spreadPct, 2)]);
-    renderStepChips();
+      : [r, mean2(a, b, "v_top_mv"), mean2(a, b, "v_bottom_mv"), v, Math.max(a.noise_sd_mv, b.noise_sd_mv)];
+    sink.raw.push(row.map((x, k) => k === 0 ? x : Math.round(x * 100) / 100));
+    sink.contact.push([caps.length, +fmt(pair.spreadPct, 2)]);
+    chips();
     return;
   }
 }
@@ -552,7 +568,13 @@ async function startCalibration() {
   session = { set, path: info.default_path, letter: (info.sockets || {})[info.default_path] || "A", points: [], raw: [], aborted: false,
               prev: info.active_model, recorded: false, runId: Math.floor(Date.now() / 1000), contact: [] };
   drawSockets(session.letter);
-  const total = set.values.length + 1;
+  // After A-A: two resistors on B-B and on C-C (closest to 1 and to 4 Ohm), so the tester measures its
+  // own correction for the other body cord wires and checks the table
+  session.extraPaths = info.corrections ? ["Al-Ar", "Bl-Br"].filter(p => (info.paths || []).includes(p)) : [];
+  session.extraR = pickExtraResistors(set.values);
+  if (session.extraR.length < 2) session.extraPaths = [];
+  session.extra = {};
+  const total = set.values.length + 1 + session.extraPaths.length * session.extraR.length;
   show("s-wizard");
   stepView(1, total, "Preparing the tester…", "", false);
   setReading("–", "", 0);
@@ -567,7 +589,8 @@ async function startCalibration() {
       if (Date.now() - t0 > 3000) $("hint").textContent = "Unplug any body cord or weapon from the tester.";
       await sleep(POLL_MS);
     }
-    stepView(1, total, "Remove everything from the tester", "No cords, no clips, no resistor. Then each resistor is connected twice, to check the contacts.", false);
+    stepView(1, total, "Remove everything from the tester", "No cords, no clips, no resistor. Then each resistor is connected twice, to check the contacts" +
+      (session.extraPaths.length ? ", first on socket A, then two of them on sockets B and C." : "."), false);
     const open = await waitFor(s => s.open, (s, holds, fresh) => {
       setReading(s.open ? "Open" : "≈ " + fmtR(s.r_est_ohm), s.open ? (s.stable ? "Stable" : "Settling…") : "Something is still connected", fresh);
     });
@@ -575,7 +598,21 @@ async function startCalibration() {
                      v_top_mv: open.v_top_mv, v_bottom_mv: open.v_bottom_mv, v_diff_mv: open.v_diff_mv,
                      v_top_rev_mv: open.v_top_rev_mv, v_diff_rev_mv: open.v_diff_rev_mv };
     feedback("captured");
-    for (let i = 0; i < set.values.length; i++) await captureResistor(i, total);
+    for (let i = 0; i < set.values.length; i++) await captureResistor(set.values[i], i + 2, total, session.letter, session, renderStepChips);
+    let step = set.values.length + 2;
+    for (const path of session.extraPaths) {
+      const letter = ((info.ends || {})[path] || [path.charAt(0)])[0].charAt(0);
+      session.extra[path] = { points: [], raw: [], contact: [] };
+      await api("POST", "/api/cal/begin", { path });
+      drawSockets(letter);
+      for (const r of session.extraR) {
+        await captureResistor(r, step++, total, letter, session.extra[path], () => renderExtraChips(path, letter));
+      }
+    }
+    if (session.extraPaths.length) {
+      await api("POST", "/api/cal/begin", { path: session.path });  // back to A-A ("Check a resistor")
+      drawSockets(session.letter);
+    }
     $("progress").style.width = "100%";
     await showResult();
   } catch (e) {
@@ -589,6 +626,24 @@ let lastFit = null;
 async function showResult() {
   const fit = await api("POST", "/api/cal/fit", { path: session.path, open: { v_high_mv: session.open.v_high_mv }, points: session.points });
   lastFit = fit;
+  // B-B and C-C: the tester's own correction relative to this fit, compared with the standard table
+  session.corrections = {};
+  let extraHtml = "";
+  for (const path of session.extraPaths) {
+    const letter = ((info.ends || {})[path] || [path.charAt(0)])[0].charAt(0);
+    try {
+      const c = await api("POST", "/api/cal/correction", { path, points: session.extra[path].points });
+      session.corrections[path] = c;
+      const dev = c.table_deviation_at_1_ohm_mohm;
+      extraHtml += Math.abs(dev) > 50
+        ? '<div class="banner warn">Socket ' + letter + ': ' + fmt(Math.abs(dev), 0) + ' mΩ ' + (dev > 0 ? "more" : "less") +
+          ' than usual for this hardware. Check that socket, its wiring and the contacts. The measured correction is used.</div>'
+        : '<p class="muted">Socket ' + letter + ': measured, within ' + fmt(Math.max(Math.abs(dev), 1), 0) + ' mΩ of the standard values.</p>';
+    } catch (e) {
+      extraHtml += '<div class="banner warn">Socket ' + letter + ' could not be corrected (' + e.message + '). The standard values stay in use.</div>';
+    }
+  }
+  $("extra-result").innerHTML = extraHtml;
   feedback(fit.verdict === "fail" ? "fail" : "pass");
   const labels = { excellent: ["Excellent", "ok"], pass: ["Pass", "mid"], fail: ["Fail", "ko"] };
   const [word, cls] = labels[fit.verdict];
@@ -634,7 +689,12 @@ function runRecord() {
     fit: [m.v_gpio_mv, m.r1_r2_ohm, m.r_internal_ohm, m.driver_slope_ohm_per_a || 0],
     prev: [p.v_gpio_mv, p.r1_r2_ohm, p.r_internal_ohm, p.driver_slope_ohm_per_a || 0],
     max_err: [lastFit.fit.max_err_pct, lastFit.factory.max_err_pct, lastFit.active.max_err_pct],
-    verdict: lastFit.verdict, saved: !!session.saved
+    verdict: lastFit.verdict, saved: !!session.saved,
+    // B-B / C-C: [r, v_top, v_bottom, v_diff, sd, rev v_top, rev v_diff] per resistor and the correction
+    corr: Object.fromEntries((session.extraPaths || []).filter(p => session.extra[p]).map(p => [p, {
+      pts: session.extra[p].raw, contact: session.extra[p].contact,
+      c: session.corrections && session.corrections[p] ? [session.corrections[p].scale, session.corrections[p].offset_ohm,
+         session.corrections[p].table_deviation_at_1_ohm_mohm] : null }]))
   };
 }
 
@@ -650,8 +710,10 @@ async function recordRun() {
 $("btn-save").onclick = async () => {
   $("btn-save").disabled = true;
   try {
-    await api("POST", "/api/cal/save", { run_id: session.runId });
+    const res = await api("POST", "/api/cal/save", { run_id: session.runId });
     session.saved = true;
+    const extra = (res.corrections_saved || []).map(p => "socket " + (((info.ends || {})[p] || [p])[0].charAt(0)));
+    $("saved-note").textContent = "Saved. The tester uses the new calibration now" + (extra.length ? ", including " + extra.join(" and ") : "") + ".";
     $("saved-note").classList.remove("hidden");
     $("result-actions").classList.add("hidden");
     $("btn-result-undo").classList.remove("hidden");
