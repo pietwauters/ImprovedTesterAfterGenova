@@ -81,10 +81,12 @@ generated `src/calibrate_html.h` on every build — edit the HTML, never the
 header). Resistor sets and run history live in the operator's browser.
 
 - **`CalibrationPaths.h`** — all 15 connections with drive configuration,
-  ADC channels and physical end points (`from`/`to`, e.g. "B bottom", "A top").
-  `Cl-Cr` (socket A top to bottom) is the default path: its model is used for
-  all thresholds. `tools/cal_validate.py` measures how well that model reads
-  the other connections.
+  ADC channels and physical end points (`from`/`to`, e.g. "B bottom", "A top"),
+  `CalPathIndex`, and `defaultPathCorrection()`: per connection
+  `R = scale * R(A-A model) + offset` (hw_rev3 table from two testers;
+  identity elsewhere). `Cl-Cr` (socket A top to bottom) is the calibrated
+  path. The calibration also measures B-B and C-C and stores the tester's own
+  corrections for them (`CalibrationStore::saveCorrection`).
 - **`CalibrationStore`** — NVS `cal_store`: model per path + previous (undo),
   ring of 6 run records. Model type `divider-ri` (M2) is current;
   `empirical-bidir` (Rs + c/R) is converted on load (`Ri = -c/Rs`);
@@ -156,7 +158,11 @@ teardown (blink restart, LED clear) after `doEpeeTest`/`doFoilTest`/
 ## Thresholds
 
 All pass/fail colour breakpoints (green/yellow/orange/red/broken) are derived
-at runtime in `Tester::UpdateThresholdsWithLeadResistance(RLead)` from a small
+at runtime in `Tester::UpdateThresholdsWithLeadResistance(RLead)`, each for the
+connection it is compared with (`mvThresholdFor(path, ohm, lead)`; body cord
+and reel green/yellow per wire, lamé split into bottom `Br-Cr` and top `Cr-Cl`),
+and OLED values go through `Tester::ohms(terminal, terminal, mV)`. Base values
+come from a small
 set of user-configurable base values in Ohms (`BodycordThreshold`,
 `ReelBodycordThreshold`, `FoilSingleWireThreshold`, `FoilLoopThreshold`,
 `FoilMassProbeThreshold`, `EpeeSingleWireThreshold`, `EpeeLoopThreshold`,

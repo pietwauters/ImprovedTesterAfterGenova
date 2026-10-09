@@ -91,9 +91,11 @@ def model_resistance(model_json, v_diff_mv):
     return max(roots) if roots else -1.0
 
 
-def signed_error(model_json, r, v_diff_mv):
-    """Error in % of max(R, 1 Ohm), as the firmware judges it."""
+def signed_error(model_json, r, v_diff_mv, corr=None):
+    """Error in % of max(R, 1 Ohm), as the firmware judges it; corr = (scale, offset) of the connection."""
     est = model_resistance(model_json, v_diff_mv)
+    if est >= 0 and corr is not None:
+        est = max(0.0, corr[0] * est + corr[1])
     return est, ((est - r) / max(r, 1.0) * 100) if est >= 0 else float("nan")
 
 
@@ -191,13 +193,22 @@ def measure_connection(tester, info, path, set_name, resistors, prompt):
     own = None
     if len(points) >= 4:  # an own model needs 4 points
         own = tester.post("/api/cal/fit", {"path": path, "open": {"v_high_mv": v_high}, "points": points})["model"]
-    print(f"\n  {'R ref':>7}  {'tester reads':>12}  {'difference':>11}  {'error':>8}" + ("   own model error" if own else ""))
-    act_err, own_err, diffs = [], [], []
+    # The correction the tester applies on this connection (firmware with per-connection corrections)
+    c = info.get("corrections", {}).get(path)
+    corr = (c["scale"], c["offset_ohm"]) if c else None
+    if corr:
+        print(f"  Correction in use: scale {corr[0]:.4f}, offset {corr[1] * 1000:+.0f} mOhm "
+              f"({'measured on this tester' if c.get('own') else 'hardware table'})")
+    print(f"\n  {'R ref':>7}  {'tester reads':>12}  {'difference':>11}  {'error':>8}  {'A-A model only':>15}"
+          + ("   own model error" if own else ""))
+    act_err, own_err, diffs, raw_err = [], [], [], []
     for p in points:
-        est, e = signed_error(active, p["r_ohm"], p["v_diff_mv"])
+        est, e = signed_error(active, p["r_ohm"], p["v_diff_mv"], corr)
+        _, e_raw = signed_error(active, p["r_ohm"], p["v_diff_mv"])
         act_err.append(e)
+        raw_err.append(e_raw)
         diffs.append(est - p["r_ohm"])
-        line = f"  {p['r_ohm']:7.3f}  {est:8.3f} Ohm  {(est - p['r_ohm']) * 1000:+7.0f} mOhm  {e:+7.2f} %"
+        line = f"  {p['r_ohm']:7.3f}  {est:8.3f} Ohm  {(est - p['r_ohm']) * 1000:+7.0f} mOhm  {e:+7.2f} %  {e_raw:+13.2f} %"
         if own:
             _, eo = signed_error(own, p["r_ohm"], p["v_diff_mv"])
             own_err.append(eo)
@@ -225,7 +236,9 @@ def measure_connection(tester, info, path, set_name, resistors, prompt):
                   + ([active.get("driver_slope_ohm_per_a", 0)] if "r_internal_ohm" in active else []),
         "own": ([own["v_gpio_mv"], own["r1_r2_ohm"], own.get("r_internal_ohm", own.get("correction_ohm2"))]
                 + ([own.get("driver_slope_ohm_per_a", 0)] if "r_internal_ohm" in own else [])) if own else None,
+        "correction": list(corr) if corr else None,  # applied on top of "active" (scale, offset Ohm)
         "result": {"active_worst": round(worst_act, 3), "active_rms": round(rms_act, 3),
+                   "uncorrected_worst": round(max(raw_err, key=abs), 3),
                    "own_worst": round(worst_own, 3) if own else None, "mean_diff_ohm": round(mean_diff, 4)},
     }
     return record
@@ -301,11 +314,12 @@ def main():
 
     if results:
         print(f"\nSummary ({len(results)} connections, recorded in {args.runs_file}):")
-        print(f"  {'path':6s}  {'connection':22s}  {'tester model worst':>18}  {'RMS':>6}  {'difference':>11}  {'own model':>9}  use")
+        print(f"  {'path':6s}  {'connection':22s}  {'tester reads worst':>18}  {'RMS':>6}  {'difference':>11}  {'without corr.':>13}  {'own model':>9}  use")
         for rec in results:
             res = rec["result"]
             print(f"  {rec['path']:6s}  {rec['ends'][0] + ' - ' + rec['ends'][1]:22s}  {res['active_worst']:+16.2f} %"
                   f"  {res['active_rms']:4.2f} %  {res['mean_diff_ohm'] * 1000:+6.0f} mOhm  "
+                  + f"{res.get('uncorrected_worst', float('nan')):+11.2f} %  "
                   + (f"{res['own_worst']:7.2f} %" if res["own_worst"] is not None else "        –")
                   + f"  {rec['use']}")
     print("The tester is back in normal mode.")

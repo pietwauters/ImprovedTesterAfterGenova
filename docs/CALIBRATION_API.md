@@ -72,6 +72,7 @@ All responses are JSON. Units are in the names (`_mv`, `_ohm`, `_pct`).
 | POST | `/api/cal/fit` | see below | Fit a model; returns it with per-point errors for the new, factory and active model. Nothing is saved |
 | POST | `/api/cal/save` | `{"run_id":123}` (optional) | Save the last fit (refused if there is none or it failed) |
 | POST | `/api/cal/undo` | `{"path":"Cl-Cr"}` (optional) | Swap the current and previous model of a path |
+| POST | `/api/cal/correction` | `{"path":"Bl-Br","points":[{"r_ohm","v_diff_mv"},...]}` (2 to 8) | Correction of that connection relative to the A-A fit; saved by the next `/save` |
 | POST | `/api/cal/run` | run record JSON, max 1536 bytes compacted, must have `"id"` | Store a run record in the tester's ring |
 | GET | `/api/cal/runs` | | Stored run records, oldest first |
 | POST | `/api/cal/feedback` | `{"event":"reset"\|"captured"\|"pass"\|"fail"}` | LED matrix: blue C, green flash on a capture, green or red C for the verdict |
@@ -131,11 +132,31 @@ python3 tools/cal_wizard.py                  # next time: the last set again
 python3 tools/cal_wizard.py --list-sets      # named sets: --set-name NAME
 ```
 
+## Corrections per connection
+
+The calibrated model belongs to socket A (top to bottom). Other connections
+differ by their drive resistance (a scale, up to ~5 %) and their internal
+series resistance (an offset; C bottom is ~0.1 Ohm higher on hw_rev3). Each
+connection therefore has a correction relative to the A-A model:
+`R = scale * R(A-A model) + offset`. `defaultPathCorrection()` in
+`CalibrationPaths.h` holds the table per hardware revision (hw_rev3: pooled
+from two testers; identity elsewhere). Every colour threshold and every OLED
+value uses the correction of the connection it measures.
+
+The calibration measures B-B and C-C itself: after the A-A resistors the page
+asks for two resistors (closest to 1 and 4 Ohm) on socket B and on socket C.
+`/api/cal/correction` fits scale and offset for those relative to the A-A fit
+of the session and reports how far the table is off at 1 Ohm (the page warns
+above 50 mOhm); `/api/cal/save` stores them with the model, replacing the
+table for B-B and C-C on that tester. `/api/cal/info` lists the corrections in
+use (`own: true` when measured on this tester).
+
 ## Accuracy on other connections
 
-`tools/cal_validate.py` measures the resistor set on other connections (any
-path, see `--list`) without saving, and reports per connection how the
-tester's model reads each resistor (signed error) and how good a model of the
+`tools/cal_validate.py` measures the resistor set (1 to 8 resistors) on other
+connections (any path, see `--list`) without saving, and reports per
+connection how the tester reads each resistor with its correction, and with
+the A-A model alone (signed error) and how good a model of the
 connection's own would be. Default: A-A as reference, then B-B, C-C, the
 bottom pairs (epee loop, foil loop, bottom lame) and the cross pairs used by
 the weapon tests (tip wire, probe); `--priority 3` adds the rest. Results go to

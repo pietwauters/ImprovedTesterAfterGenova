@@ -216,6 +216,9 @@ def report_validations(runs):
         else:  # older records: the Rs + c/R model the tester used then
             e = errors((a[0] / 1000, a[1], a[2]), R, V)
             own = errors((o[0] / 1000, o[1], o[2]), R, V) if o else None
+        corr = run.get("correction")
+        if corr:  # what the tester reads with the correction of this connection
+            e = [((corr[0] * (r * (1 + x / 100 * max(r, 1.0) / r)) + corr[1]) - r) / max(r, 1.0) * 100 for x, r in zip(e, R)]
         diff = sum(ei * max(r, 1.0) / 100 for ei, r in zip(e, R)) / len(R)  # mean difference in Ohm
         ends = " - ".join(run.get("ends", ["?", "?"]))
         name = f" '{run['name']}'" if run.get("name") else ""
