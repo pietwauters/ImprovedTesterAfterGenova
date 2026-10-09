@@ -410,7 +410,13 @@ async function waitFor(want, describe) {
     let s;
     try { s = await api("GET", "/api/cal/sample"); } catch (e) { await sleep(1000); continue; }
     if (!s.active) throw new Error("The tester left calibration mode.");
-    const holds = s.window > 0 && want(s);
+    if (!(s.window > 0) || s.v_diff_mv === undefined) {
+      // No readings yet: the window is empty right after a session starts or the connection changes
+      since = null;
+      await sleep(POLL_MS);
+      continue;
+    }
+    const holds = want(s);
     if (holds && since === null) since = s.seq;
     if (!holds) since = null;
     const fresh = since === null ? 0 : Math.min(1, (s.seq - since) / WINDOW);
