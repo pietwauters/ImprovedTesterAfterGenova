@@ -20,7 +20,8 @@ struct StoredModel {
     uint16_t version;
     uint8_t type;  // CalModelType
     uint8_t flags;
-    EmpiricalModel params;  // type 3: v_gpio, Rs, Ri. Types 1 and 2: v_gpio, Rs, c (in the r_internal slot)
+    EmpiricalModel params;  // type 3: v_gpio, Rs, Ri, driver slope. Types 1 and 2: v_gpio, Rs, c (in the
+                            // r_internal slot). Blobs stored before the driver slope read with slope 0.
     uint32_t runId;         // run record that produced it (0 = unknown)
 };
 

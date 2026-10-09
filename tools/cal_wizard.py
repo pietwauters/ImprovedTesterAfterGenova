@@ -270,9 +270,9 @@ def main():
                     + ([open_s["v_top_rev_mv"], open_s["v_diff_rev_mv"]] if "v_diff_rev_mv" in open_s else []),
             # [r_ohm, v_top_mv, v_bottom_mv, v_diff_mv, noise_sd_mv(, reversed v_top_mv, reversed v_diff_mv)]
             "pts": raw,
-            "model": "m2",  # fit/prev: [v_gpio_mv, Rs, Ri]
-            "fit": [m["v_gpio_mv"], m["r1_r2_ohm"], m["r_internal_ohm"]],
-            "prev": [prev["v_gpio_mv"], prev["r1_r2_ohm"], prev["r_internal_ohm"]],
+            "model": "m2s",  # fit/prev: [v_gpio_mv, Rs, Ri, driver slope Ohm/A]
+            "fit": [m["v_gpio_mv"], m["r1_r2_ohm"], m["r_internal_ohm"], m.get("driver_slope_ohm_per_a", 0)],
+            "prev": [prev["v_gpio_mv"], prev["r1_r2_ohm"], prev["r_internal_ohm"], prev.get("driver_slope_ohm_per_a", 0)],
             "max_err": [fit["fit"]["max_err_pct"], fit["factory"]["max_err_pct"], fit["active"]["max_err_pct"]],
             "verdict": verdict, "saved": saved,
         }

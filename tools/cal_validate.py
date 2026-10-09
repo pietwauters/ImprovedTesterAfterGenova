@@ -72,7 +72,11 @@ def model_resistance(model_json, v_diff_mv):
     if "r_internal_ohm" in model_json:
         if v >= g:
             return -1.0
-        return max(0.0, k * v / (g - v) - model_json["r_internal_ohm"]) if v > 0 else 0.0
+        if v <= 0:
+            return 0.0
+        s = model_json.get("driver_slope_ohm_per_a", 0.0)
+        rs_eff = (k + math.sqrt(k * k + 4 * s * (g - v))) / 2  # Rs + s * I, I = (Vg - V) / Rs_eff
+        return max(0.0, rs_eff * v / (g - v) - model_json["r_internal_ohm"])
     c = model_json["correction_ohm2"]
     if v <= 0 or v >= g:
         return -1.0
@@ -205,9 +209,12 @@ def measure_connection(tester, info, path, set_name, resistors, prompt):
                  open_s.get("v_top_rev_mv", 0), open_s.get("v_diff_rev_mv", 0)],
         # [r_ohm, v_top_mv, v_bottom_mv, v_diff_mv (average), noise_sd_mv, reversed v_top_mv, reversed v_diff_mv]
         "pts": raw, "contact": contact,
-        "model": "m2" if "r_internal_ohm" in active else "m0",  # active/own: [v_gpio_mv, Rs, Ri or c]
-        "active": [active["v_gpio_mv"], active["r1_r2_ohm"], active.get("r_internal_ohm", active.get("correction_ohm2"))],
-        "own": [own["v_gpio_mv"], own["r1_r2_ohm"], own.get("r_internal_ohm", own.get("correction_ohm2"))],
+        # active/own: [v_gpio_mv, Rs, Ri, driver slope] (m2s) or [v_gpio_mv, Rs, c] (m0)
+        "model": "m2s" if "r_internal_ohm" in active else "m0",
+        "active": [active["v_gpio_mv"], active["r1_r2_ohm"], active.get("r_internal_ohm", active.get("correction_ohm2"))]
+                  + ([active.get("driver_slope_ohm_per_a", 0)] if "r_internal_ohm" in active else []),
+        "own": [own["v_gpio_mv"], own["r1_r2_ohm"], own.get("r_internal_ohm", own.get("correction_ohm2"))]
+               + ([own.get("driver_slope_ohm_per_a", 0)] if "r_internal_ohm" in own else []),
         "result": {"active_worst": round(worst_act, 3), "active_rms": round(rms_act, 3), "own_worst": round(worst_own, 3)},
     }
     return record

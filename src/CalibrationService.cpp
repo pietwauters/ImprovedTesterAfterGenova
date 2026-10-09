@@ -289,6 +289,7 @@ static cJSON* modelToJson(const EmpiricalModel& m) {
     addRounded(obj, "v_gpio_mv", m.v_gpio * 1000.0, 2);
     addRounded(obj, "r1_r2_ohm", m.r1_r2, 3);
     addRounded(obj, "r_internal_ohm", m.r_internal, 4);
+    addRounded(obj, "driver_slope_ohm_per_a", m.driver_slope, 1);
     return obj;
 }
 

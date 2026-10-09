@@ -112,25 +112,42 @@ float EmpiricalResistorCalibrator::get_resistance_empirical(float v_diff_measure
     return modelResistance(model(), v_diff_measured);
 }
 
-// R = Rs * V / (V_gpio - V) - Ri, clamped at 0 (a short reads 0, never negative)
-float EmpiricalResistorCalibrator::modelResistance(const EmpiricalModel& m, float v_diff) {
+// R = Rs_eff * V / (V_gpio - V) - Ri, with the current I = (V_gpio - V) / Rs_eff and Rs_eff = Rs + s I:
+// Rs_eff^2 - Rs Rs_eff - s (V_gpio - V) = 0
+double EmpiricalResistorCalibrator::unclampedResistance(const EmpiricalModel& m, double v_diff) {
     if (m.v_gpio <= 0 || m.r1_r2 <= 0 || v_diff >= m.v_gpio) {
-        return -1.0f;  // not calibrated, or open / beyond the drive voltage
+        return -1e9;
+    }
+    double d = (double)m.r1_r2 * m.r1_r2 + 4.0 * m.driver_slope * (m.v_gpio - v_diff);
+    if (d < 0) {
+        return -1e9;
+    }
+    double rs_eff = (m.r1_r2 + sqrt(d)) / 2.0;
+    return rs_eff * v_diff / (m.v_gpio - v_diff) - m.r_internal;
+}
+
+// Clamped at 0: a short reads 0, never negative; -1 for open or beyond the drive voltage
+float EmpiricalResistorCalibrator::modelResistance(const EmpiricalModel& m, float v_diff) {
+    double r = unclampedResistance(m, v_diff);
+    if (r <= -1e8) {
+        return -1.0f;
     }
     if (v_diff <= 0) {
         return 0.0f;
     }
-    float r = m.r1_r2 * v_diff / (m.v_gpio - v_diff) - m.r_internal;
-    return r > 0 ? r : 0.0f;
+    return r > 0 ? (float)r : 0.0f;
 }
 
-// V = V_gpio * (R + Ri) / (R + Ri + Rs)
+// V = V_gpio * x / (x + Rs_eff), x = R + Ri, with I = V_gpio / (x + Rs_eff) and Rs_eff = Rs + s I:
+// Rs_eff^2 + (x - Rs) Rs_eff - (Rs x + s V_gpio) = 0
 float EmpiricalResistorCalibrator::modelVoltage(const EmpiricalModel& m, float r_ohm) {
-    float r = r_ohm + m.r_internal;
-    if (r <= 0) {
+    double x = (double)r_ohm + m.r_internal;
+    if (x <= 0) {
         return 0.0f;
     }
-    return m.v_gpio * r / (r + m.r1_r2);
+    double b = x - m.r1_r2;
+    double rs_eff = (-b + sqrt(b * b + 4.0 * ((double)m.r1_r2 * x + (double)m.driver_slope * m.v_gpio))) / 2.0;
+    return (float)(m.v_gpio * x / (x + rs_eff));
 }
 
 void EmpiricalResistorCalibrator::print_roundtrip_diagnostics(float lead_ohm) {
@@ -167,17 +184,21 @@ double EmpiricalResistorCalibrator::weightedCost(const EmpiricalModel& m, const 
                                                  int n) {
     double sum = 0.0;
     for (int i = 0; i < n; i++) {
-        if (v_diff[i] <= 0 || v_diff[i] >= m.v_gpio || m.r1_r2 <= 0) {
+        if (v_diff[i] <= 0) {
             return 1e12;
         }
-        double r_est = (double)m.r1_r2 * v_diff[i] / (m.v_gpio - v_diff[i]) - m.r_internal;
+        double r_est = unclampedResistance(m, v_diff[i]);
+        if (r_est <= -1e8) {
+            return 1e12;
+        }
         double e = (r_est - r_ref[i]) / fmax(r_ref[i], 1.0) * 100.0 / targetPct(r_ref[i]);
         sum += e * e;
     }
     return sum;
 }
 
-// Nelder-Mead over (Rs, Ri), V_gpio fixed, started from a plain divider (median Rs, Ri = 0)
+// Nelder-Mead over (Rs, Ri), V_gpio and the driver slope fixed, started from a plain divider
+// (median series resistance, lowered by slope x typical current; Ri = 0)
 EmpiricalModel EmpiricalResistorCalibrator::fit(const float* r_ref, const float* v_diff, int n, float v_gpio_open) {
     float seeds[CalMaxPoints];
     int ns = 0;
@@ -195,9 +216,10 @@ EmpiricalModel EmpiricalResistorCalibrator::fit(const float* r_ref, const float*
         }
         seeds[j + 1] = k;
     }
-    double rs0 = ns > 0 ? seeds[ns / 2] : Default_r1_r2;
+    double rs_plain = ns > 0 ? seeds[ns / 2] : Default_r1_r2;
+    double rs0 = rs_plain - Default_driver_slope * v_gpio_open / (rs_plain + 3.0);
     auto cost = [&](double rs, double ri) {
-        EmpiricalModel m = {v_gpio_open, (float)rs, (float)ri};
+        EmpiricalModel m = {v_gpio_open, (float)rs, (float)ri, Default_driver_slope};
         return weightedCost(m, r_ref, v_diff, n);
     };
 
@@ -285,7 +307,7 @@ EmpiricalModel EmpiricalResistorCalibrator::fit(const float* r_ref, const float*
             f[0] = f[best];
         }
     }
-    return {v_gpio_open, (float)x[0][0], (float)x[0][1]};
+    return {v_gpio_open, (float)x[0][0], (float)x[0][1], Default_driver_slope};
 }
 
 CalEvaluation EmpiricalResistorCalibrator::evaluate(const EmpiricalModel& m, const float* r_ref, const float* v_diff,
@@ -336,7 +358,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
     const CalibrationPath& path = kDefaultCalibrationPath;
 
     printf("\n=== EMPIRICAL RESISTANCE CALIBRATOR ===\n");
-    printf("Model: V_diff = V_gpio * (R + Ri) / (R + Ri + Rs)\n");
+    printf("Model: V_diff = V_gpio * (R + Ri) / (R + Ri + Rs + s*I)\n");
     printf("Calibration path: %s\n\n", path.name);
 
     // Step 0: Measure open circuit reference voltage
@@ -416,7 +438,7 @@ bool EmpiricalResistorCalibrator::calibrate_interactively_empirical() {
     EmpiricalModel fitted = fit(R_values, V_diff_values, num_points, v_gpio_open);
     setModel(fitted);
     printf("  V_gpio_open = %.1f mV\n", fitted.v_gpio * 1000);
-    printf("  Rs = %.2f Ω\n", fitted.r1_r2);
+    printf("  Rs = %.2f Ω (at zero current; driver slope %.0f Ω/A)\n", fitted.r1_r2, fitted.driver_slope);
     printf("  Ri = %.3f Ω\n\n", fitted.r_internal);
 
     // Step 3: Result

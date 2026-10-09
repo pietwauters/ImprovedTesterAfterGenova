@@ -6,7 +6,16 @@
 CalibrationStore calibrationStore;
 
 static const char* kNamespace = "cal_store";
-static constexpr uint16_t kStoredModelVersion = 1;
+static constexpr uint16_t kStoredModelVersion = 2;  // 2: EmpiricalModel with driver_slope
+
+// Layout of version 1 blobs (no driver slope)
+struct StoredModelV1 {
+    uint16_t version;
+    uint8_t type;
+    uint8_t flags;
+    float v_gpio, r1_r2, r_internal;
+    uint32_t runId;
+};
 // Keep this many NVS entries (32 bytes each) free for the settings and everything else
 static constexpr size_t kNvsReserveEntries = 64;
 
@@ -35,10 +44,25 @@ bool CalibrationStore::readModel(const char* key, StoredModel& out) const {
         return false;
     }
     StoredModel m;
-    size_t size = sizeof(m);
-    esp_err_t err = nvs_get_blob(handle, key, &m, &size);
+    size_t size = 0;
+    esp_err_t err = nvs_get_blob(handle, key, nullptr, &size);
+    if (err == ESP_OK && size == sizeof(StoredModelV1)) {
+        StoredModelV1 v1;
+        err = nvs_get_blob(handle, key, &v1, &size);
+        m = {v1.version, v1.type, v1.flags, {v1.v_gpio, v1.r1_r2, v1.r_internal, 0.0f}, v1.runId};
+        if (v1.version != 1) {
+            err = ESP_FAIL;
+        }
+    } else if (err == ESP_OK && size == sizeof(StoredModel)) {
+        err = nvs_get_blob(handle, key, &m, &size);
+        if (m.version != kStoredModelVersion) {
+            err = ESP_FAIL;
+        }
+    } else {
+        err = ESP_FAIL;
+    }
     nvs_close(handle);
-    if (err != ESP_OK || size != sizeof(m) || m.version != kStoredModelVersion ||
+    if (err != ESP_OK ||
         (m.type != CalModelEmpiricalV1 && m.type != CalModelEmpiricalBidir && m.type != CalModelDividerRi)) {
         return false;
     }
@@ -72,7 +96,7 @@ bool usableModel(const StoredModel& stored, EmpiricalModel& out) {
             return true;
         case CalModelEmpiricalBidir:
             // V = Vg R/(R + Rs + c/R) behaves like an internal series resistance Ri = -c/Rs
-            out = {stored.params.v_gpio, stored.params.r1_r2, -stored.params.r_internal / stored.params.r1_r2};
+            out = {stored.params.v_gpio, stored.params.r1_r2, -stored.params.r_internal / stored.params.r1_r2, 0.0f};
             return stored.params.r1_r2 > 0;
         default:
             return false;

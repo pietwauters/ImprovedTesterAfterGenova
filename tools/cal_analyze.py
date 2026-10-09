@@ -16,24 +16,38 @@ import math
 import sys
 
 
-# ---- Model M2 (firmware since the M2 change): internal series resistance Ri between the sense points
-#   V = Vg (R + Ri) / (R + Ri + Rs)        R = Rs V / (Vg - V) - Ri
+# ---- Model M2 (firmware): internal series resistance Ri between the sense points, and a series
+# resistance outside them that grows with the current (GPIO drivers): Rs_eff = Rs + s * I.
+#   V = Vg (R + Ri) / (R + Ri + Rs_eff)        R = Rs_eff V / (Vg - V) - Ri
+# s is a fixed constant (DRIVER_SLOPE, same for every tester); only Rs and Ri are fitted.
 # Errors are judged and fitted relative to max(R, 1 Ohm), against a target of 2 % up to 10 Ohm and
 # 5 % above (limits 5 % and 10 %), exactly as the firmware does.
 
 TARGET_LOW, LIMIT_LOW, TARGET_HIGH, LIMIT_HIGH, HIGH_FROM = 2.0, 5.0, 5.0, 10.0, 10.0
+DRIVER_SLOPE = 400.0  # Ohm/A: GPIO driver resistance rises with the current
+
+
+def m2_rs_eff_from_v(m, v):
+    """Rs_eff for a measured V: I = (Vg - V)/Rs_eff and Rs_eff = Rs + s I -> Rs_eff^2 - Rs Rs_eff - s (Vg - V) = 0."""
+    g, rs, ri = m[:3]
+    s = m[3] if len(m) > 3 else 0.0
+    return (rs + math.sqrt(rs * rs + 4 * s * (g - v))) / 2
 
 
 def m2_volt(m, r):
-    g, rs, ri = m
-    return g * (r + ri) / (r + ri + rs)
+    """V for a resistance: x = R + Ri, I = Vg/(x + Rs_eff) -> Rs_eff^2 + (x - Rs) Rs_eff - (Rs x + s Vg) = 0."""
+    g, rs, ri = m[:3]
+    s = m[3] if len(m) > 3 else 0.0
+    x = r + ri
+    rse = (-(x - rs) + math.sqrt((x - rs) ** 2 + 4 * (rs * x + s * g))) / 2
+    return g * x / (x + rse)
 
 
 def m2_res(m, v, clamp=True):
-    g, rs, ri = m
+    g = m[0]
     if v >= g:
         return -1.0
-    r = rs * v / (g - v) - ri
+    r = m2_rs_eff_from_v(m, v) * v / (g - v) - m[2]
     return max(0.0, r) if clamp else r
 
 
@@ -50,21 +64,22 @@ def m2_errors(m, R, V):
     return [scaled_error(m2_res(m, v, clamp=False), r) for r, v in zip(R, V)]
 
 
-def fit_m2(R, V, vg):
-    """Least squares on the tolerance-weighted error over (Rs, Ri), V_gpio fixed."""
+def fit_m2(R, V, vg, slope=DRIVER_SLOPE):
+    """Least squares on the tolerance-weighted error over (Rs, Ri); V_gpio and the driver slope fixed."""
     def cost(x):
-        e = m2_errors((vg, x[0], x[1]), R, V)
+        e = m2_errors((vg, x[0], x[1], slope), R, V)
         return sum((ei / target(r)) ** 2 for ei, r in zip(e, R))
     seeds = sorted(r * (vg - v) / v for r, v in zip(R, V) if 0 < v < vg)
-    x = nelder_mead(cost, [seeds[len(seeds) // 2], 0.0], [2.0, 0.05])
+    i_typ = vg / (seeds[len(seeds) // 2] + 3)  # rough current, to start Rs below the plain-divider value
+    x = nelder_mead(cost, [seeds[len(seeds) // 2] - slope * i_typ, 0.0], [2.0, 0.05])
     x = nelder_mead(cost, x, [0.2, 0.005])
-    return (vg, x[0], x[1])
+    return (vg, x[0], x[1], slope)
 
 
 def m2_from_m0(m):
-    """An M0 model (Rs, c) as M2: Ri = -c / Rs."""
+    """An M0 model (Rs, c) as M2 without driver slope: Ri = -c / Rs."""
     g, rs, c = m
-    return (g, rs, -c / rs)
+    return (g, rs, -c / rs, 0.0)
 
 
 def volt(m, r):
@@ -195,9 +210,9 @@ def report_validations(runs):
         R = [p[0] for p in run["pts"]]
         V = [p[3] / 1000 for p in run["pts"]]  # bidirectional average
         a, o = run["active"], run["own"]
-        if run.get("model") == "m2":
-            e = m2_errors((a[0] / 1000, a[1], a[2]), R, V)
-            own = m2_errors((o[0] / 1000, o[1], o[2]), R, V)
+        if run.get("model") in ("m2", "m2s"):
+            e = m2_errors((a[0] / 1000, *a[1:]), R, V)
+            own = m2_errors((o[0] / 1000, *o[1:]), R, V)
         else:  # older records: the Rs + c/R model the tester used then
             e = errors((a[0] / 1000, a[1], a[2]), R, V)
             own = errors((o[0] / 1000, o[1], o[2]), R, V)

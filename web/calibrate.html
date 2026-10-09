@@ -609,7 +609,7 @@ async function showResult() {
   $("compare-rows").innerHTML = [["New calibration", fit.fit], ["Before this run", fit.active], ["Factory values", fit.factory]].map(([n, e]) =>
     "<tr><td>" + n + '</td><td class="' + errCls(e.max_err_pct) + '">' + fmt(e.max_err_pct, 2) + " %</td><td>" + fmt(e.rms_mv, 2) + " mV</td></tr>").join("");
   const m = fit.model;
-  $("params").textContent = "V_gpio " + fmt(m.v_gpio_mv, 1) + " mV · Rs " + fmt(m.r1_r2_ohm, 3) + " Ω · Ri " + fmt(m.r_internal_ohm, 4) + " Ω (inside the tester) · set “" + session.set.name + "”";
+  $("params").textContent = "V_gpio " + fmt(m.v_gpio_mv, 1) + " mV · Rs " + fmt(m.r1_r2_ohm, 3) + " Ω + " + fmt(m.driver_slope_ohm_per_a || 0, 0) + " Ω/A × current · Ri " + fmt(m.r_internal_ohm, 4) + " Ω (inside the tester) · set “" + session.set.name + "”";
   $("btn-save").classList.toggle("hidden", fit.verdict === "fail");
   $("result-actions").classList.remove("hidden");
   $("saved-note").classList.add("hidden");
@@ -630,9 +630,9 @@ function runRecord() {
       ? [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv, session.open.v_top_rev_mv, session.open.v_diff_rev_mv]
       : [session.open.v_top_mv, session.open.v_bottom_mv, session.open.v_diff_mv],
     pts: session.raw,
-    model: "m2",  // fit/prev: [v_gpio_mv, Rs, Ri]
-    fit: [m.v_gpio_mv, m.r1_r2_ohm, m.r_internal_ohm],
-    prev: [p.v_gpio_mv, p.r1_r2_ohm, p.r_internal_ohm],
+    model: "m2s",  // fit/prev: [v_gpio_mv, Rs, Ri, driver slope Ohm/A]
+    fit: [m.v_gpio_mv, m.r1_r2_ohm, m.r_internal_ohm, m.driver_slope_ohm_per_a || 0],
+    prev: [p.v_gpio_mv, p.r1_r2_ohm, p.r_internal_ohm, p.driver_slope_ohm_per_a || 0],
     max_err: [lastFit.fit.max_err_pct, lastFit.factory.max_err_pct, lastFit.active.max_err_pct],
     verdict: lastFit.verdict, saved: !!session.saved
   };

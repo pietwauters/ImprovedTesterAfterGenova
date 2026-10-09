@@ -42,9 +42,14 @@ While a session is open, mode detection is paused, the LED matrix shows a blue
 
 Model (M2): the tester sees the unknown resistance plus an internal series
 resistance `Ri` (PCB traces, vias, wiring to the sockets) between its sense
-points, driven through `Rs` (the two 33 Ohm resistors plus the GPIO drivers):
-`V_diff = V_gpio * (R + Ri) / (R + Ri + Rs)`, so `R = Rs * V / (V_gpio - V) - Ri`,
-clamped at 0. It replaced `Rs + c/R`, whose negative `c` on hw_rev3 was `Ri` in
+points, driven through `Rs_eff = Rs + s * I` outside them (the two 33 Ohm
+resistors plus the GPIO drivers, whose resistance rises with the current):
+`V_diff = V_gpio * (R + Ri) / (R + Ri + Rs_eff)`, so
+`R = Rs_eff * V / (V_gpio - V) - Ri`, clamped at 0. The driver slope `s` is a
+fixed 400 Ohm/A for every tester (measured 356-468 Ohm/A on two hw_rev3
+testers, mostly the high-side driver); only `Rs` and `Ri` are calibrated. Both
+directions are closed formulas (one quadratic each). Models stored before the
+slope existed keep working with slope 0. It replaced `Rs + c/R`, whose negative `c` on hw_rev3 was `Ri` in
 disguise and had no solution below about 0.3 Ohm. Stored models of that older
 type are converted (`Ri = -c/Rs`, reported as `converted`); a recalibration is
 more accurate.

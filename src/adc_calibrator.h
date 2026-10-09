@@ -4,16 +4,22 @@
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
 
+// GPIO driver resistance rises with the current: Rs_eff = Rs + DriverSlope * I. Fixed for every
+// tester (same on two hw_rev3 testers, 356-468 Ohm/A, and consistent with the ESP32 output drivers);
+// only Rs and Ri are calibrated.
+constexpr float Default_driver_slope = 400.0f;  // Ohm per A
+
 // Model used until a tester is calibrated
 #if HARDWARE_REV == 3
-// Pooled fit of two calibrated hw_rev3 testers on bidirectional readings (2026-10-08);
-// within 1.8 % on both without their own calibration
+// Pooled fit of two calibrated hw_rev3 testers on bidirectional readings (2026-10-09), each tester
+// weighted equally; within 1.4-3.7 % up to 10 Ohm on both without their own calibration
 constexpr float Default_v_gpio = 3.137;
-constexpr float Default_r1_r2 = 92.173;
-constexpr float Default_r_internal = 0.0925;
+constexpr float Default_r1_r2 = 79.744;
+constexpr float Default_r_internal = 0.1177;
 #else
+// The earlier default (116 Ohm, no slope) at its typical current of 27 mA
 constexpr float Default_v_gpio = 3.1290;
-constexpr float Default_r1_r2 = 116.0;
+constexpr float Default_r1_r2 = 105.21;
 constexpr float Default_r_internal = 0.0;
 #endif
 
@@ -30,12 +36,14 @@ constexpr int CalMinPoints = 4;
 constexpr int CalMaxPoints = 8;
 
 // Model M2: the tester sees the unknown R plus an internal series resistance Ri (PCB traces, vias,
-// wiring to the sockets) between its sense points, driven through Rs (the two 33 Ohm resistors plus
-// the GPIO drivers):  V_diff = V_gpio * (R + Ri) / (R + Ri + Rs)   ->   R = Rs * V / (V_gpio - V) - Ri
+// wiring to the sockets) between its sense points, driven through Rs_eff = Rs + s * I outside them
+// (the two 33 Ohm resistors plus the GPIO drivers, whose resistance rises with the current I):
+//   V_diff = V_gpio * (R + Ri) / (R + Ri + Rs_eff)   ->   R = Rs_eff * V / (V_gpio - V) - Ri
 struct EmpiricalModel {
-    float v_gpio;      // open-circuit drive voltage (V)
-    float r1_r2;       // series resistance outside the sense points, Rs (Ohm)
-    float r_internal;  // series resistance between the sense points, Ri (Ohm)
+    float v_gpio;        // open-circuit drive voltage (V)
+    float r1_r2;         // series resistance outside the sense points at zero current, Rs (Ohm)
+    float r_internal;    // series resistance between the sense points, Ri (Ohm)
+    float driver_slope;  // s (Ohm/A); 0 for models stored before the driver slope existed
 };
 
 enum CalVerdict { CalExcellent, CalPass, CalFail };
@@ -90,18 +98,22 @@ class EmpiricalResistorCalibrator {
     EmpiricalReading measure(const CalibrationPath& path, int readings = 64, bool verbose = true);
 
     // Model access
-    EmpiricalModel model() const { return {v_gpio, r1_r2, r_internal}; }
+    EmpiricalModel model() const { return {v_gpio, r1_r2, r_internal, driver_slope}; }
     void setModel(const EmpiricalModel& m) {
         v_gpio = m.v_gpio;
         r1_r2 = m.r1_r2;
         r_internal = m.r_internal;
+        driver_slope = m.driver_slope;
     }
-    static EmpiricalModel factoryModel() { return {Default_v_gpio, Default_r1_r2, Default_r_internal}; }
+    static EmpiricalModel factoryModel() {
+        return {Default_v_gpio, Default_r1_r2, Default_r_internal, Default_driver_slope};
+    }
 
     // Pure model maths, no hardware access. Voltages in V, resistances in Ohm.
     static float modelVoltage(const EmpiricalModel& m, float r_ohm);
     static float modelResistance(const EmpiricalModel& m, float v_diff);
-    // Fit Rs and Ri to known resistors (tolerance-weighted least squares); v_gpio from the open circuit
+    // Fit Rs and Ri to known resistors (tolerance-weighted least squares); v_gpio from the open circuit,
+    // driver slope fixed at Default_driver_slope
     static EmpiricalModel fit(const float* r_ref, const float* v_diff, int n, float v_gpio_open);
     static CalEvaluation evaluate(const EmpiricalModel& m, const float* r_ref, const float* v_diff, int n);
     // Per point: error in % of max(R, 1 Ohm), and the target and limit for a resistor of that size
@@ -128,6 +140,7 @@ class EmpiricalResistorCalibrator {
     float v_gpio = Default_v_gpio;
     float r1_r2 = Default_r1_r2;
     float r_internal = Default_r_internal;
+    float driver_slope = Default_driver_slope;
 
     // ADC calibration
     esp_adc_cal_characteristics_t adc_chars;
@@ -137,5 +150,6 @@ class EmpiricalResistorCalibrator {
     char read_char_from_uart(long timeout = 999);  // ESP32-safe char input with WDT reset
 
     static double weightedCost(const EmpiricalModel& m, const float* r_ref, const float* v_diff, int n);
+    static double unclampedResistance(const EmpiricalModel& m, double v_diff);  // -1e9 when invalid
     void show_calibration_quality(const float* R_values, const float* V_diff_values, int num_points);
 };

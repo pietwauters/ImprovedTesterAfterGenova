@@ -63,9 +63,11 @@ Recently refactored (`refactor/measurement-architecture` branch, merged into
   resistance + JSON/binary serialization for cross-device communication).
 - **`adc_calibrator.h/.cpp`** (`EmpiricalResistorCalibrator`) — converts raw mV
   readings to Ohms (`get_resistance_empirical`) and Ohm thresholds to mV
-  (`get_mv_threshold`) with model M2: `V = V_gpio (R + Ri) / (R + Ri + Rs)`,
-  `Rs` = 33 Ohm resistors + GPIO drivers outside the sense points, `Ri` =
-  internal series resistance between them (traces, vias, socket wiring).
+  (`get_mv_threshold`) with model M2: `V = V_gpio (R + Ri) / (R + Ri + Rs_eff)`,
+  `Rs_eff = Rs + s·I` = 33 Ohm resistors + GPIO drivers outside the sense
+  points (driver resistance rises with current; `s` = `Default_driver_slope`,
+  400 Ohm/A, fixed), `Ri` = internal series resistance between them (traces,
+  vias, socket wiring). Only `Rs` and `Ri` are calibrated.
   Readings clamp at 0. Pure model maths (`fit`, `evaluate`, `modelResistance`)
   plus `measure(path)` (averages `getDifferentialSample` readings). Errors
   count relative to max(R, 1 Ohm); verdict ≤ 2 % excellent, ≤ 5 % pass up to
