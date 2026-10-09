@@ -173,6 +173,25 @@ int EmpiricalResistorCalibrator::get_mv_threshold(float resistance_ohm, float le
     return (int)lroundf(modelVoltage(model(), total_R) * 1000.0f);
 }
 
+float EmpiricalResistorCalibrator::resistanceFor(int pathIndex, float v_diff) const {
+    float r = modelResistance(model(), v_diff);
+    if (r < 0 || pathIndex < 0 || pathIndex >= kNumCalibrationPaths) {
+        return r;
+    }
+    float c = corrections[pathIndex].scale * r + corrections[pathIndex].offset_ohm;
+    return c > 0 ? c : 0.0f;
+}
+
+int EmpiricalResistorCalibrator::mvThresholdFor(int pathIndex, float resistance_ohm, float lead_ohm) const {
+    if (pathIndex < 0 || pathIndex >= kNumCalibrationPaths) {
+        return get_mv_threshold(resistance_ohm, lead_ohm);
+    }
+    // The A-A model resistance that this connection reads as resistance_ohm + lead_ohm
+    const PathCorrection& c = corrections[pathIndex];
+    float r_aa = (resistance_ohm + lead_ohm - c.offset_ohm) / c.scale;
+    return get_mv_threshold(r_aa, 0.0f);
+}
+
 float EmpiricalResistorCalibrator::scaledErrorPct(float r_est, float r_ref) {
     return (r_est - r_ref) / fmaxf(r_ref, 1.0f) * 100.0f;
 }

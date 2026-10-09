@@ -82,9 +82,11 @@ class Tester {
     static constexpr int ShortDetectThreshold = 1500;    // ArBr/BrCr below this → cross-short
     static constexpr int WireConnectedThreshold = 2000;  // ArBr below this → body cord connected
 
-    // Color breakpoints derived from settings (computed in UpdateThresholdsWithLeadResistance)
-    // Lamé
-    int Lame_Green, Lame_Yellow, Lame_Orange;
+    // Color breakpoints derived from settings (computed in UpdateThresholdsWithLeadResistance), each in mV
+    // for the connection it is compared with (see CalibrationPaths.h for the per-connection correction)
+    // Lamé: bottom via the crocodile clip (Br-Cr), top via the cap nut (Cr-Cl)
+    int LameBottom_Green, LameBottom_Yellow, LameBottom_Orange;
+    int LameTop_Green, LameTop_Yellow, LameTop_Orange;
     // Foil body cord (loop/ArBr)
     int FoilLoop_Green, FoilLoop_Yellow, FoilLoop_Orange;
     // Foil/Epee tip wire (single wire/ArCl)
@@ -96,14 +98,15 @@ class Tester {
     // Epee return wire (loop/ArCr)
     int EpeeLoop_Green, EpeeLoop_Yellow, EpeeLoop_Orange;
     int EpeeLeak;
-    // Main wire test (body cord) — normal mode
-    int Bodycord_Green, Bodycord_Yellow, Bodycord_Broken;
+    // Main wire test (body cord) — normal mode; green/yellow per wire (index 0 = A, 1 = B, 2 = C)
+    int Bodycord_Green[3], Bodycord_Yellow[3], Bodycord_Broken;
     // Main wire test — reel mode (×1, ×2, ×5 of ReelBodycordThreshold)
-    int Reel_Green, Reel_Yellow, Reel_Broken;
+    int Reel_Green[3], Reel_Yellow[3], Reel_Broken;
+    int WireOneOhm[3];  // 1 Ohm per wire: lead resistance is only captured below this
 
     int ReferenceBroken = 0;  // Set by SetWiretestMode()
-    int ReferenceGreen = 0;
-    int ReferenceYellow = 0;
+    int ReferenceGreen[3] = {0, 0, 0};
+    int ReferenceYellow[3] = {0, 0, 0};
     int ReferenceOrange = 0;
     int ReferenceShort = 160;
     bool ReelMode = false;
@@ -151,6 +154,8 @@ class Tester {
     uint32_t calLedColor_ = 0;           // C colour while calibrating: blue, or the verdict
     unsigned long calFlashUntil_ = 0;    // green "captured" flash ends here (0 = none)
     bool debouncedCondition(std::function<bool()> condition, int debounceMs = 10);
+    // Resistance in Ohm for a measurement (mV) between two terminals, corrected for that connection
+    float ohms(Terminal a, Terminal b, float mv) const;
 
     // Static task wrapper
     static void testerTaskWrapper(void* parameter);

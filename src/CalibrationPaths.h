@@ -50,6 +50,57 @@ static const CalibrationPath kCalibrationPaths[] = {
 };
 static const int kNumCalibrationPaths = sizeof(kCalibrationPaths) / sizeof(kCalibrationPaths[0]);
 
+// Index into kCalibrationPaths (same order as the table above)
+enum CalPathIndex {
+    PathClCr,  // A top - A bottom (calibrated)
+    PathAlAr,  // B top - B bottom
+    PathBlBr,  // C top - C bottom
+    PathArCr,  // B bottom - A bottom: epee loop
+    PathArBr,  // B bottom - C bottom: foil loop
+    PathBrCr,  // C bottom - A bottom: bottom lame
+    PathArCl,  // B bottom - A top: tip wire
+    PathBrCl,  // C bottom - A top: probe
+};
+
+// Correction of a connection relative to the calibrated A-A model:
+//   R(connection) = scale * R(A-A model) + offset_ohm
+// It covers the differences in drive resistance (scale) and internal series resistance (offset)
+// between the sockets. Measured on two testers per hardware revision; a calibration can replace the
+// values for B-B and C-C with the tester's own.
+struct PathCorrection {
+    float scale;
+    float offset_ohm;
+};
+
+inline PathCorrection defaultPathCorrection(int pathIndex) {
+#if HARDWARE_REV == 3
+    // Pooled from two hw_rev3 testers (1.039 and 3.26 Ohm on each connection, 2026-10-09); halves the
+    // error on these connections (RMS 72 -> 35 mOhm, the level of the calibrated connection itself)
+    switch (pathIndex) {
+        case PathAlAr:
+            return {1.0213f, 0.001f};
+        case PathBlBr:
+            return {1.0260f, -0.147f};
+        case PathArCr:
+            return {1.0096f, -0.030f};
+        case PathArBr:
+            return {1.0110f, -0.096f};
+        case PathBrCr:
+            return {0.9981f, -0.117f};
+        case PathArCl:
+            return {1.0137f, 0.037f};
+        case PathBrCl:
+            return {1.0142f, -0.086f};
+        default:
+            break;
+    }
+#endif
+    (void)pathIndex;
+    return {1.0f, 0.0f};  // A-A, connections used only for mode detection, other revisions
+}
+
+inline int calibrationPathIndex(const CalibrationPath& path) { return (int)(&path - kCalibrationPaths); }
+
 // The path whose model the tester uses for all thresholds (one model in firmware for now)
 static const CalibrationPath& kDefaultCalibrationPath = kCalibrationPaths[0];
 

@@ -72,6 +72,18 @@ class EmpiricalResistorCalibrator {
     // Get threshold in millivolts — matches the unit returned by getDifferentialSample().
     int get_mv_threshold(float resistance_ohm, float lead_ohm = 0.0f) const;
 
+    // Per connection (index into kCalibrationPaths): the A-A model plus the connection's correction.
+    // resistanceFor: reading in Ohm (0 for a short, -1 for open); mvThresholdFor: threshold in mV for a
+    // resistance (plus lead resistance) on that connection.
+    float resistanceFor(int pathIndex, float v_diff) const;
+    int mvThresholdFor(int pathIndex, float resistance_ohm, float lead_ohm = 0.0f) const;
+    PathCorrection correction(int pathIndex) const { return corrections[pathIndex]; }
+    void setCorrection(int pathIndex, const PathCorrection& c) { corrections[pathIndex] = c; }
+    void resetCorrections() {
+        for (int i = 0; i < kNumCalibrationPaths; i++) corrections[i] = defaultPathCorrection(i);
+    }
+    EmpiricalResistorCalibrator() { resetCorrections(); }
+
     void DoFactoryReset() { setModel(factoryModel()); };
 
     // Measurement functions
@@ -141,6 +153,7 @@ class EmpiricalResistorCalibrator {
     float r1_r2 = Default_r1_r2;
     float r_internal = Default_r_internal;
     float driver_slope = Default_driver_slope;
+    PathCorrection corrections[kNumCalibrationPaths];
 
     // ADC calibration
     esp_adc_cal_characteristics_t adc_chars;
