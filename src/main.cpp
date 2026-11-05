@@ -78,6 +78,7 @@ bool IgnoreCalibrationWarning = false;
 bool ShowWelcome = true;
 bool LowPowerMode = false;
 bool EnableFoilLeakTest = false;
+bool EnableReelMode = true;
 int SpecialModeSleepTimeout = 60;  // s without a connection in epee/foil/lame mode before deep sleep
 int CalibrationDisplayChannel = 0;  // Default to channel 0
 bool CalibrationAutoMode = false;   // Auto mode flag
@@ -357,6 +358,7 @@ void LoadSettings() {
     settings.addBool("ShowWelcome", "Show welcome lights (for debugging)?", &ShowWelcome);
     settings.addBool("LowPowerMode", "Apply low power settings (slightly lower response times)", &LowPowerMode);
     settings.addBool("EnableFoilLeakTest", "Enable foil tip leaktest (expert)", &EnableFoilLeakTest);
+    settings.addBool("EnableReelMode", "Enable cable reel mode (short sockets A+B on top)", &EnableReelMode);
     settings.addInt("SpecialModeSleepTimeout",
                     "Seconds with nothing connected in epee/foil/lame mode before sleep (0 = never, needs LowPowerMode)",
                     &SpecialModeSleepTimeout);

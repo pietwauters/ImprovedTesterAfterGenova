@@ -128,7 +128,8 @@ Pairs below use code terminal names (see the mapping table above).
 Cable Reel mode is armed/disarmed by short-circuiting top sockets A+B
 (physical letters; code `Al-Bl`): `doReelTest` calls `SetWiretestMode(true)`,
 and it toggles off when the `Al-Bl` measurement drops below `Ohm_50` while
-already in `ReelMode` (README: "short A+B again to exit").
+already in `ReelMode` (README: "short A+B again to exit"). The `EnableReelMode`
+setting (default on) blocks arming and leaves the mode if turned off while armed.
 
 If no special-mode trigger fires and a body cord is detected across the 3x3
 matrix (`MeasurementAnalysis::isWirePluggedIn`), the state machine moves into

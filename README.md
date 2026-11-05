@@ -195,6 +195,8 @@ Short-circuit sockets A and B on the top face. An "R" appears on the display. Co
 
 To return to Body Cord Tester mode: short-circuit sockets A and B on the top face again.
 
+This mode can be switched off on the settings page ("Enable cable reel mode", on by default). A short between A and B on the top face then does nothing, which stops an épée plugged into the top sockets from entering reel mode by accident.
+
 ---
 
 ## Mode Summary

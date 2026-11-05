@@ -422,7 +422,8 @@ void Tester::handleWaitingState() {
             ShowingShape = SHAPE_R;
         }
         esp_task_wdt_reset();
-        if (currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
+        // Also leave when the mode is switched off in the settings while armed
+        if (!EnableReelMode || currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
             currentState = Waiting;
             ShowingShape = SHAPE_NONE;
             LedPanel->ClearAll();
@@ -476,7 +477,7 @@ void Tester::handleWaitingState() {
             doEpeeTest();
             doCommonReturnFromSpecialMode();
             lastSpecialTestExit = millis();
-        } else if (currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
+        } else if (EnableReelMode && currentMeasurements_.get(Terminal::Al, Terminal::Bl) < Ohm_50) {
             UpdateThresholdsWithLeadResistance(AverageLeadResistance * 2);
             doReelTest();
             restartSleepGrace();
@@ -843,10 +844,13 @@ void Tester::doReelTest() {
     // Initial capture before entering loop
     Capture_.captureMatrix3x3(currentMeasurements_);
 
-    while (!MeasurementAnalysis::isWirePluggedInEpee(currentMeasurements_, ReferenceBroken)) {
+    while (EnableReelMode && !MeasurementAnalysis::isWirePluggedInEpee(currentMeasurements_, ReferenceBroken)) {
         esp_task_wdt_reset();
         // Refresh measurements for next iteration
         Capture_.captureMatrix3x3(currentMeasurements_);
+    }
+    if (!EnableReelMode) {
+        SetWiretestMode(false);  // switched off in the settings while waiting for a reel
     }
     ShowingShape = SHAPE_NONE;
     LedPanel->ClearAll();
